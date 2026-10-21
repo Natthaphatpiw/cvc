@@ -5,8 +5,10 @@ create or replace function kol.match_creators(
   full_text_weight float default 1.0, semantic_weight float default 1.0, rrf_k int default 50,
   exclude_ids uuid[] default '{}'
 ) returns table (creator_id uuid, score float, max_similarity float)
-language sql stable set search_path = ''
-set hnsw.iterative_scan = 'relaxed_order' set hnsw.ef_search = '200' as $$
+language sql volatile set search_path = '' as $$
+  -- pgvector iterative HNSW scan, set per transaction at run time: a function-level SET on hnsw.* needs superuser
+  -- on Supabase when the vector library is not loaded yet in the migration session.
+  select set_config('hnsw.iterative_scan', 'relaxed_order', true), set_config('hnsw.ef_search', '200', true);
   with eligible as (
     select c.id from kol.creators c
     where c.country_code = 'TH' and not c.opted_out and not c.is_blocked and not c.possible_minor

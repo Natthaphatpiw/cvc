@@ -96,6 +96,14 @@ await check('every table has RLS enabled', `select count(*)::int from pg_class c
   and not c.relispartition`, 0);
 await check('svc_agent can read kpi benchmarks', 'select count(*)::int from ref.kpi_benchmarks', 5, 'svc_agent');
 await check('svc_api can read personas', 'select count(*)::int from ref.audience_personas', 14, 'svc_api');
+// No function may bake an extension GUC into its definition: on Supabase migrations run as a non-superuser and
+// `create function ... set hnsw.*` fails with "permission denied to set parameter" (42501).
+await check('no function-level SET of hnsw.* parameters', `select count(*)::int from pg_proc p
+  where exists (select 1 from unnest(coalesce(p.proconfig, '{}')) c where c like 'hnsw.%')`, 0);
+await check('match_creators runs as svc_agent and sets iterative scan for the transaction',
+  `select current_setting('hnsw.iterative_scan', true) from (
+     select count(*) from kol.match_creators('ทดสอบ', array_fill(0, array[1536])::real[]::extensions.vector, 10)) t`,
+  'relaxed_order', 'svc_agent');
 await check('svc_agent cannot write rate cards',
   `insert into ref.rate_cards (tier, format, fee_min_thb, fee_max_thb, source) values ('nano','live',1,2,'x') returning 1`,
   (v) => typeof v === 'string' && /permission denied/.test(v), 'svc_agent');
