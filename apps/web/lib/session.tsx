@@ -3,7 +3,7 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
 import { usePathname } from 'next/navigation';
 import type { MeResponse } from '@cvc/schemas';
-import { ApiError, setSessionGate, systemApi } from './api';
+import { ApiError, setSessionGate, setSessionRecovery, systemApi } from './api';
 import { NOTICE_VERSION, isLineLoginConfigured } from './config';
 import { isLiffSession, logoutLiff } from './liff';
 import { localStore } from './local-store';
@@ -37,33 +37,74 @@ const GUEST: Snapshot = { status: 'guest', user: null };
 
 let bootPromise: Promise<Snapshot> | null = null;
 
-const NO_GUEST_SESSION_KEY = 'cvc:guest-session-unavailable';
+/**
+ * Set only when the API answered 501 supabase_not_configured (the server really has no Supabase, so the local demo's
+ * x-cvc-guest-id works there). Kept for 10 minutes, then the tab asks again in case the server was configured since.
+ * Any other failure (guest sign-ins disabled in Supabase, 429, 5xx, offline) is not remembered: the next request that
+ * needs a session tries again (see setSessionRecovery in ./api).
+ */
+const DEMO_MODE_KEY = 'cvc:guest-demo-mode-at';
+const DEMO_MODE_TTL_MS = 10 * 60_000;
+/** Written by earlier builds for any 501 and never expired, which left a tab without a session for good. */
+const LEGACY_NO_GUEST_KEY = 'cvc:guest-session-unavailable';
+/**
+ * Backoff between failed attempts so a broken setup is not hammered from every request: 15 s doubling to 10 min, and
+ * 10 min straight away when the API says guests are switched off or rate-limited (every attempt spends the per-IP
+ * guest budget in cvc-api).
+ */
+const BACKOFF_BASE_MS = 15_000;
+const BACKOFF_MAX_MS = 10 * 60_000;
 
-function guestSessionUnavailable(): boolean {
+function serverInDemoMode(): boolean {
   try {
-    return window.sessionStorage.getItem(NO_GUEST_SESSION_KEY) === '1';
+    window.sessionStorage.removeItem(LEGACY_NO_GUEST_KEY);
+    const at = Number(window.sessionStorage.getItem(DEMO_MODE_KEY));
+    return Number.isFinite(at) && at > 0 && Date.now() - at < DEMO_MODE_TTL_MS;
   } catch {
     return false;
   }
 }
 
-async function createGuestSession(): Promise<void> {
+let guestInFlight: Promise<boolean> | null = null;
+let retryGuestAfter = 0;
+let guestFailures = 0;
+
+function noteGuestFailure(e: unknown): void {
+  guestFailures += 1;
+  const hardStop = e instanceof ApiError && (e.status === 429 || e.code === 'guest_auth_disabled');
+  const wait = hardStop ? BACKOFF_MAX_MS : Math.min(BACKOFF_BASE_MS * 2 ** (guestFailures - 1), BACKOFF_MAX_MS);
+  retryGuestAfter = Date.now() + wait;
+}
+
+/** Creates an anonymous Supabase session through the API. True when a session now exists. Deduplicated. */
+async function createGuestSession(): Promise<boolean> {
   const sb = getSupabase();
-  if (!sb || guestSessionUnavailable()) return;
-  try {
-    const tokens = await systemApi.guest(NOTICE_VERSION);
-    await sb.auth.setSession({ access_token: tokens.accessToken, refresh_token: tokens.refreshToken });
-  } catch (e) {
-    // 501 supabase_not_configured = local demo mode on the API: requests use x-cvc-guest-id instead.
-    // Remember it for this tab so every page load does not ask again. Other failures (offline) retry next load.
-    if (e instanceof ApiError && e.status === 501) {
-      try {
-        window.sessionStorage.setItem(NO_GUEST_SESSION_KEY, '1');
-      } catch {
-        // ignore
+  if (!sb || serverInDemoMode()) return false;
+  if (Date.now() < retryGuestAfter) return false;
+  guestInFlight ??= (async () => {
+    try {
+      const tokens = await systemApi.guest(NOTICE_VERSION);
+      // supabase-js returns setSession failures instead of throwing
+      const { error } = await sb.auth.setSession({ access_token: tokens.accessToken, refresh_token: tokens.refreshToken });
+      if (error) throw error;
+      guestFailures = 0;
+      retryGuestAfter = 0;
+      return true;
+    } catch (e) {
+      noteGuestFailure(e);
+      if (e instanceof ApiError && e.status === 501 && e.code === 'supabase_not_configured') {
+        try {
+          window.sessionStorage.setItem(DEMO_MODE_KEY, String(Date.now()));
+        } catch {
+          // ignore
+        }
       }
+      return false;
+    } finally {
+      guestInFlight = null;
     }
-  }
+  })();
+  return guestInFlight;
 }
 
 async function boot(): Promise<Snapshot> {
@@ -97,6 +138,16 @@ async function boot(): Promise<Snapshot> {
     // Offline or API down: keep the LINE session, the profile loads on refresh.
     return { status: 'line', user: null };
   }
+}
+
+/**
+ * On-demand recovery for requests that find no session. Never for a LINE user: an expired or temporarily unrefreshable
+ * LINE session must not be replaced by a new anonymous one (that would hide the account and its history).
+ */
+async function recoverGuestSession(): Promise<boolean> {
+  const snap = await (bootPromise ?? Promise.resolve(null)).catch(() => null);
+  if (snap?.status === 'line') return false;
+  return createGuestSession();
 }
 
 function getBoot(): Promise<Snapshot> {
@@ -151,7 +202,10 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   const pathname = usePathname();
   const [snap, setSnap] = useState<{ status: SessionStatus; user: MeResponse | null }>(() => {
     // Register the gate before any child effect fires a request (child effects run before this provider's).
-    if (typeof window !== 'undefined') setSessionGate(getBoot());
+    if (typeof window !== 'undefined') {
+      setSessionGate(getBoot());
+      setSessionRecovery(recoverGuestSession);
+    }
     return { status: 'loading', user: null };
   });
   const [liffSession, setLiffSession] = useState(false);

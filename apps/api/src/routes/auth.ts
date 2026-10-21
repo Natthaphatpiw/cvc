@@ -1,6 +1,6 @@
 import { Hono } from 'hono';
 import { isAuthApiError, type User } from '@supabase/supabase-js';
-import { requireEdge, requireUser, sha256Hex } from '@cvc/auth';
+import { isSupabaseConfigured, requireEdge, requireUser, sha256Hex } from '@cvc/auth';
 import { getApiStore } from '@cvc/db';
 import {
   ClaimRequest,
@@ -29,7 +29,12 @@ const authUpstreamError = () => new AppError(502, 'auth_upstream_error', MSG.ups
 // "anonymous sign-ins" limit in Supabase Auth → Rate Limits and rely on rl:guest:{clientIp} for per-user limits.
 // ---------------------------------------------------------------------------------------------------------------
 authRoutes.post('/guest', requireEdge(), async (c) => {
-  if (!isGuestAuthConfigured()) throw new AppError(501, 'supabase_not_configured', MSG.supabaseNotConfigured);
+  // 'supabase_not_configured' tells the browser to fall back to x-cvc-guest-id, which requireUser only accepts when
+  // SUPABASE_URL is unset; any other gap (e.g. the publishable key missing here) is a distinct, non-cached error.
+  if (!isSupabaseConfigured()) throw new AppError(501, 'supabase_not_configured', MSG.supabaseNotConfigured);
+  if (!isGuestAuthConfigured()) {
+    throw new AppError(503, 'guest_auth_misconfigured', 'ระบบผู้เยี่ยมชมยังตั้งค่าไม่ครบ (cvc-api ขาด NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY)');
+  }
   assertNotBot(c);
   await enforceRateLimit(c, `rl:guest:${clientIp(c)}`, 10, 3600);
 

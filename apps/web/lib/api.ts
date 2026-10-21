@@ -115,6 +115,16 @@ export function setSessionGate(p: Promise<unknown> | null): void {
   sessionGate = p;
 }
 
+let sessionRecovery: (() => Promise<unknown>) | null = null;
+
+/**
+ * SessionProvider registers how to (re)create the guest session. A request about to go out without a session (the
+ * page-load attempt failed, or the session was lost) runs it once first instead of being sent without credentials.
+ */
+export function setSessionRecovery(fn: (() => Promise<unknown>) | null): void {
+  sessionRecovery = fn;
+}
+
 async function accessToken(): Promise<string | null> {
   const sb = getSupabase();
   if (!sb) return null;
@@ -145,7 +155,11 @@ export async function authHeaders(opts: { waitForSession?: boolean } = {}): Prom
   if (opts.waitForSession !== false && sessionGate) {
     await sessionGate.catch(() => undefined);
   }
-  const token = await accessToken();
+  let token = await accessToken();
+  if (!token && opts.waitForSession !== false && sessionRecovery) {
+    await sessionRecovery().catch(() => undefined);
+    token = await accessToken();
+  }
   if (token) return { authorization: `Bearer ${token}` };
   const guestId = getGuestId();
   return guestId ? { 'x-cvc-guest-id': guestId } : {};

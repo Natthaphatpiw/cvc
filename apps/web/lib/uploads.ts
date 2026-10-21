@@ -93,9 +93,10 @@ export type UploadArgs = {
 
 /** Uploads to the private store as `uploads/{userId}/{kind}-{id}.{ext}` through the API's handleUpload route. */
 export async function uploadAsset({ file, fileName, contentType, kind, onProgress, signal }: UploadArgs): Promise<RunAsset> {
+  // Headers first: authHeaders() waits for the session and may (re)create the guest session, which changes the id.
+  const headers = await authHeaders();
   const userId = await currentUserId();
   if (!userId) throw new ApiError(401, 'no_session', 'ยังไม่พร้อมอัปโหลด กรุณาโหลดหน้านี้ใหม่');
-  const headers = await authHeaders();
   const { upload } = await import('@vercel/blob/client');
   const pathname = uploadPathname(userId, kind, contentType, fileName);
   try {
