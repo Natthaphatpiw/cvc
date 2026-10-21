@@ -1,0 +1,30 @@
+{
+  "name": "@cvc/ai",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit -p .",
+    "test": "vitest run --passWithNoTests"
+  },
+  "dependencies": {
+    "@cvc/schemas": "*",
+    "@cvc/scoring": "*",
+    "@cvc/thai": "*",
+    "zod": "4.6.7",
+    "ai": "7.0.148",
+    "@ai-sdk/openai": "4.0.99",
+    "@ai-sdk/gateway": "4.0.121",
+    "openai": "7.39.0",
+    "@mastra/core": "1.78.0",
+    "@mastra/memory": "1.38.0",
+    "@mastra/pg": "1.31.2",
+    "@mastra/ai-sdk": "1.11.1"
+  },
+  "devDependencies": {
+    "vitest": "5.0.5"
+  }
+}

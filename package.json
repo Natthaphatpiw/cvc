@@ -1,0 +1,29 @@
+{
+  "name": "cvc-kol-matcher",
+  "private": true,
+  "version": "0.1.0",
+  "description": "TikTok KOL Matcher for the Thai market — Convert Cake assessment MVP",
+  "packageManager": "npm@11.12.1",
+  "engines": {
+    "node": ">=22.13"
+  },
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "dev": "turbo run dev --parallel",
+    "build": "turbo run build",
+    "typecheck": "turbo run typecheck",
+    "test": "turbo run test",
+    "lint": "turbo run lint",
+    "db:test": "node scripts/test-migrations.mjs"
+  },
+  "devDependencies": {
+    "@electric-sql/pglite": "0.5.10",
+    "@electric-sql/pglite-pgvector": "0.0.11",
+    "@types/node": "24.19.2",
+    "turbo": "2.11.10",
+    "typescript": "5.9.3"
+  }
+}

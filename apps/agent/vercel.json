@@ -1,0 +1,13 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "regions": ["sin1"],
+  "functions": {
+    "app/api/agent/**/*": {
+      "maxDuration": 800
+    }
+  },
+  "crons": [
+    { "path": "/api/agent/cron/requeue-stuck", "schedule": "*/5 * * * *" },
+    { "path": "/api/agent/cron/retention", "schedule": "0 20 * * *" }
+  ]
+}

@@ -1,0 +1,17 @@
+{
+  "name": "@cvc/auth",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit -p ."
+  },
+  "dependencies": {
+    "jose": "6.2.13",
+    "hono": "4.13.13",
+    "@vercel/oidc": "4.0.2"
+  }
+}

@@ -1,0 +1,16 @@
+{
+  "name": "@cvc/cache",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit -p ."
+  },
+  "dependencies": {
+    "@upstash/redis": "1.39.0",
+    "@upstash/ratelimit": "2.2.0"
+  }
+}

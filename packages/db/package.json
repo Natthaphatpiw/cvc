@@ -1,0 +1,16 @@
+{
+  "name": "@cvc/db",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit -p ."
+  },
+  "dependencies": {
+    "@cvc/schemas": "*",
+    "postgres": "3.4.9"
+  }
+}

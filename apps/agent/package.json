@@ -1,0 +1,38 @@
+{
+  "name": "@cvc/app-agent",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "next dev -p 3002",
+    "build": "next build",
+    "start": "next start -p 3002",
+    "typecheck": "tsc --noEmit -p ."
+  },
+  "dependencies": {
+    "@cvc/schemas": "*",
+    "@cvc/thai": "*",
+    "@cvc/scoring": "*",
+    "@cvc/db": "*",
+    "@cvc/auth": "*",
+    "@cvc/cache": "*",
+    "@cvc/providers": "*",
+    "@cvc/media": "*",
+    "@cvc/ai": "*",
+    "next": "16.4.2",
+    "react": "19.3.1",
+    "react-dom": "19.3.1",
+    "hono": "4.13.13",
+    "workflow": "5.2.3",
+    "@mastra/ai-sdk": "1.11.1",
+    "ai": "7.0.148",
+    "@vercel/blob": "2.8.2",
+    "@vercel/functions": "3.10.2",
+    "@vercel/oidc": "4.0.2",
+    "botid": "1.5.11"
+  },
+  "devDependencies": {
+    "@types/react": "19.3.0",
+    "@types/react-dom": "19.3.0"
+  }
+}

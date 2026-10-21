@@ -1,0 +1,22 @@
+{
+  "name": "@cvc/providers",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit -p .",
+    "test": "vitest run --passWithNoTests"
+  },
+  "dependencies": {
+    "@cvc/schemas": "*",
+    "@cvc/thai": "*",
+    "apify-client": "2.25.0",
+    "@mendable/firecrawl-js": "4.50.0"
+  },
+  "devDependencies": {
+    "vitest": "5.0.5"
+  }
+}

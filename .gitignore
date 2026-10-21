@@ -1,0 +1,22 @@
+node_modules/
+.next/
+dist/
+out/
+coverage/
+.turbo/
+.vercel/
+*.tsbuildinfo
+next-env.d.ts
+
+# env — only the .example files are committed
+.env
+.env.*
+!.env.example
+
+# local tool output
+.DS_Store
+.taste-skill/
+.hallmark/
+design-system/
+.workflow-data/
+.swc/

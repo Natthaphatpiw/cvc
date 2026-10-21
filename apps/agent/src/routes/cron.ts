@@ -1,0 +1,54 @@
+import { requireCron } from '@cvc/auth';
+import { dedupe } from '@cvc/cache';
+import { getAgentStore, type AgentStore, type RunRecord } from '@cvc/db';
+import { Hono } from 'hono';
+import { getRun } from 'workflow/api';
+import type { AppEnv } from '../http';
+import { errorMessage } from '../lib/async';
+
+const STUCK_AFTER_MINUTES = 15;
+const STUCK_MESSAGE_TH = 'การวิเคราะห์ใช้เวลานานผิดปกติและถูกหยุดไว้ กรุณาลองใหม่อีกครั้ง';
+
+async function failStuckRun(store: AgentStore, run: RunRecord): Promise<void> {
+  if (run.workflowRunId) {
+    try {
+      await getRun(run.workflowRunId).cancel({ cancelReason: `no progress for ${STUCK_AFTER_MINUTES} minutes` });
+    } catch (err) {
+      console.warn('[agent] cancel stuck workflow failed', run.workflowRunId, errorMessage(err));
+    }
+  }
+  await store.updateRun(run.id, { status: 'failed', errorMessageTh: STUCK_MESSAGE_TH, completedAt: new Date().toISOString() });
+  await store.appendProgress(run.id, { stage: run.stage ?? 'intake', status: 'failed', pct: run.progressPct, messageTh: STUCK_MESSAGE_TH });
+  try {
+    await dedupe.del(run.ownerId, run.inputHash);
+  } catch (err) {
+    console.warn('[agent] dedupe.del failed', errorMessage(err));
+  }
+}
+
+/** Vercel Cron jobs (§8.5); `Authorization: Bearer $CRON_SECRET`. */
+export function cronRoutes(): Hono<AppEnv> {
+  const r = new Hono<AppEnv>();
+
+  r.get('/cron/requeue-stuck', requireCron(), async (c) => {
+    const store = getAgentStore();
+    // already excludes terminal runs and awaiting_review (waits on a person, not on the pipeline)
+    const stuck = await store.listStaleRuns(STUCK_AFTER_MINUTES);
+    let failed = 0;
+    for (const run of stuck) {
+      try {
+        await failStuckRun(store, run);
+        failed += 1;
+      } catch (err) {
+        console.error('[agent] requeue-stuck could not fail run', run.id, errorMessage(err));
+      }
+    }
+    return c.json({ ok: true, checked: stuck.length, failed });
+  });
+
+  // MVP keeps every run and result. Phase 2 implements §8.5 here: delete chat threads and expired guest runs/results,
+  // raw/ blobs older than 30 days, uploads/ older than 24 hours, stale creators, then call api purge-anon-users.
+  r.get('/cron/retention', requireCron(), (c) => c.json({ ok: true, purged: { runs: 0, results: 0, blobs: 0 }, mode: 'mvp_noop' }));
+
+  return r;
+}

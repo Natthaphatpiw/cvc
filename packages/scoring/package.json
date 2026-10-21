@@ -1,0 +1,19 @@
+{
+  "name": "@cvc/scoring",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit -p .",
+    "test": "vitest run --passWithNoTests"
+  },
+  "dependencies": {
+    "@cvc/schemas": "*"
+  },
+  "devDependencies": {
+    "vitest": "5.0.5"
+  }
+}
