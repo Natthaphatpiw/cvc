@@ -87,7 +87,6 @@ async function fetchDocs(source: SourceKind, url: string): Promise<SourceDoc[]> 
  * persisted between steps (§4.4, §4.12 privacy). Optional and failure-tolerant: errors become a warning.
  */
 export async function prefetchSourceStep(runId: string, source: SourceKind): Promise<{ cards: number }> {
-  'use step';
   const key = StepKey.prefetch(source);
   const done = await getCheckpoint<PrefetchCheckpoint>(runId, key);
   if (done) return { cards: done.cards.length };
@@ -140,7 +139,6 @@ export async function prefetchSourceStep(runId: string, source: SourceKind): Pro
 
 /** Joins the per-source evidence cards (the "summarize" stage) and stores them once for LLM1. */
 export async function collectEvidenceStep(runId: string): Promise<{ cards: number }> {
-  'use step';
   const done = await getCheckpoint<EvidenceCheckpoint>(runId, StepKey.evidence);
   if (done) return { cards: done.cards };
 

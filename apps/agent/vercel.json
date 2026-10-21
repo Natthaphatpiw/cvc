@@ -4,6 +4,9 @@
   "functions": {
     "app/api/agent/**/*": {
       "maxDuration": 800
+    },
+    "app/api/workflow/kol-match/route.ts": {
+      "maxDuration": 800
     }
   },
   "crons": [

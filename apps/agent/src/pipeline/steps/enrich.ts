@@ -89,7 +89,6 @@ async function enrichOne(candidate: CandidateRef, brand: BrandProfile, ref: RefD
 
 /** Enrich one batch of ≤ 5 of the top-25 candidates: profile, 20 videos, metrics, tier, fee, media cache, gate 0b. */
 export async function enrichBatchStep(runId: string, batchIndex: number): Promise<{ enriched: number; excluded: number }> {
-  'use step';
   const key = StepKey.enrich(batchIndex);
   const done = await getCheckpoint<EnrichCheckpoint>(runId, key);
   if (done) return { enriched: done.enriched, excluded: done.excluded };

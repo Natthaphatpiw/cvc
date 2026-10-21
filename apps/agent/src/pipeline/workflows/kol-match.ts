@@ -1,36 +1,88 @@
-import { brandStep } from '../steps/brand';
-import { curateStep } from '../steps/curate';
-import { discoverStep, planQueriesStep } from '../steps/discover';
-import { enrichBatchStep } from '../steps/enrich';
-import { evaluateBatchStep, planEvaluationStep } from '../steps/evaluate';
-import { failRunStep, finalizeStep } from '../steps/finalize';
-import { normalizeStep } from '../steps/normalize';
-import { collectEvidenceStep, prefetchSourceStep } from '../steps/prefetch';
-import { rankStep } from '../steps/rank';
+import { WorkflowNonRetryableError, type WorkflowContext } from '@upstash/workflow';
+import { serve } from '@upstash/workflow/nextjs';
+import { errorResponse } from '../../http';
+import { RUN_INACTIVE, isRunInactive } from '../context';
+import { runKolMatch, type PipelineOutcome, type StepRunner } from '../plan';
+import {
+  QUEUE_NOT_CONFIGURED_CODE,
+  QUEUE_NOT_CONFIGURED_TH,
+  isQStashSigningConfigured,
+  runIdFromWorkflowRunId,
+  upstashEnv,
+  vercelBypassHeaders,
+} from '../queue';
+import { markRunFailed } from '../steps/finalize';
+
+export type KolMatchPayload = { runId: string };
+
+/** What a step memoizes: `inactive` means the run was cancelled or finished elsewhere while the step ran. */
+type StepEnvelope<T> = { inactive: true } | { inactive?: false; value: T };
+
+function payloadRunId(payload: unknown): string | null {
+  if (typeof payload !== 'object' || payload === null) return null;
+  const runId = (payload as { runId?: unknown }).runId;
+  return typeof runId === 'string' && runId.trim().length > 0 ? runId : null;
+}
 
 /**
- * KOL matching pipeline (MVP §17.5). Deterministic orchestration only: every argument and return value is an ID or a
- * count; all data moves through the AgentStore inside the steps.
+ * Maps the shared plan's steps onto context.run. A RUN_INACTIVE stop is returned as a value instead of thrown, so the
+ * run is then cancelled through context.cancel(): QStash records it as cancelled, without the failure function or DLQ.
+ * Any other error propagates unchanged (non-retryable ones fail the run at once, others are retried by QStash).
  */
-export async function kolMatchWorkflow(input: { runId: string }): Promise<{ resultId: string | null; status: string }> {
-  'use workflow';
-  const { runId } = input;
-  try {
-    const { sources } = await normalizeStep(runId);
-    await Promise.all(sources.map((source) => prefetchSourceStep(runId, source)));
-    await collectEvidenceStep(runId);
-    await brandStep(runId);
-    await planQueriesStep(runId);
-    const discovered = await discoverStep(runId);
-    for (let b = 0; b < discovered.batchCount; b++) await enrichBatchStep(runId, b);
-    const evaluation = await planEvaluationStep(runId);
-    for (let b = 0; b < evaluation.batchCount; b++) await evaluateBatchStep(runId, b);
-    const ranking = await rankStep(runId);
-    if (ranking.ranked > 0) await curateStep(runId);
-    const final = await finalizeStep(runId);
-    return { resultId: final.resultId, status: final.status };
-  } catch (err) {
-    await failRunStep(runId, err instanceof Error ? err.message : String(err));
-    throw err;
+function upstashStep(context: WorkflowContext<KolMatchPayload>): StepRunner {
+  return async <T>(name: string, fn: () => Promise<T>): Promise<T> => {
+    const out = await context.run(name, async (): Promise<StepEnvelope<T>> => {
+      try {
+        return { value: await fn() };
+      } catch (err) {
+        if (isRunInactive(err)) return { inactive: true };
+        throw err;
+      }
+    });
+    if (out.inactive) {
+      await context.cancel();
+      // context.cancel() always throws to stop the run; this only guards against that changing.
+      throw new WorkflowNonRetryableError(RUN_INACTIVE);
+    }
+    return out.value;
+  };
+}
+
+async function kolMatchWorkflow(context: WorkflowContext<KolMatchPayload>): Promise<PipelineOutcome> {
+  const runId = payloadRunId(context.requestPayload);
+  if (!runId) throw new WorkflowNonRetryableError('kol-match workflow payload has no runId');
+  return runKolMatch(runId, upstashStep(context));
+}
+
+function createHandler(): (request: Request) => Promise<Response> {
+  const bypass = vercelBypassHeaders();
+  const { POST } = serve<KolMatchPayload, PipelineOutcome>(kolMatchWorkflow, {
+    env: upstashEnv(),
+    // Step calls are published by this endpoint's QStash client; its global headers are forwarded to every step call,
+    // which the trigger's headers are not (the SDK drops incoming x-vercel-* headers from context.headers).
+    ...(bypass ? { qstashClient: { headers: bypass } } : {}),
+    // Called once QStash gives up on a step (retries exhausted) or a step threw WorkflowNonRetryableError.
+    failureFunction: async ({ context, failResponse }) => {
+      const runId = payloadRunId(context.requestPayload) ?? runIdFromWorkflowRunId(context.workflowRunId);
+      if (!runId) return 'run id unknown';
+      if (failResponse === RUN_INACTIVE) return 'run inactive';
+      // No-op when the run is already terminal (cancelled, completed, failed), so repeated calls are harmless.
+      await markRunFailed(runId, failResponse);
+      return 'run marked failed';
+    },
+  });
+  return POST;
+}
+
+let handler: ((request: Request) => Promise<Response>) | undefined;
+
+/** POST /api/workflow/kol-match: called only by QStash; serve() verifies the Upstash-Signature header. */
+export async function handleKolMatchWorkflow(request: Request): Promise<Response> {
+  if (process.env.NODE_ENV === 'production' && !isQStashSigningConfigured()) {
+    // Without signing keys serve() would accept unsigned calls; refuse instead of running unverified work.
+    console.error('[agent] QSTASH_CURRENT_SIGNING_KEY / QSTASH_NEXT_SIGNING_KEY are not set; workflow call refused');
+    return errorResponse(503, QUEUE_NOT_CONFIGURED_CODE, QUEUE_NOT_CONFIGURED_TH);
   }
+  handler ??= createHandler();
+  return handler(request);
 }

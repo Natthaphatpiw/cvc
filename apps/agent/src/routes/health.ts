@@ -8,16 +8,19 @@ import type { HealthResponse } from '@cvc/schemas';
 import { Hono } from 'hono';
 import { envFlag, isDemoRun } from '../env';
 import type { AppEnv } from '../http';
+import { isQueueConfigured, runnerMode, type RunnerMode } from '../pipeline/queue';
 
 /** Which integrations are configured. Booleans only; never echo a secret value. */
 export function healthRoutes(): Hono<AppEnv> {
   const r = new Hono<AppEnv>();
 
   r.get('/health', (c) => {
-    const body: HealthResponse = {
+    // `runner` is agent-only: 'upstash' (QStash queue), 'inline' (local/demo) or 'unavailable' (runs cannot start).
+    const body: HealthResponse & { runner: RunnerMode } = {
       service: 'agent',
       ok: true,
       demo: isDemoRun(),
+      runner: runnerMode(),
       configured: {
         ai: isAiConfigured(),
         kolProvider: isKolProviderConfigured(),
@@ -28,6 +31,7 @@ export function healthRoutes(): Hono<AppEnv> {
         creatorMedia: isCreatorMediaConfigured(),
         privateBlob: isPrivateBlobConfigured(),
         supabase: isSupabaseConfigured(),
+        queue: isQueueConfigured(),
       },
     };
     c.header('cache-control', 'no-store');

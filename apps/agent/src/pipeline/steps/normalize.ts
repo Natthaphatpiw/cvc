@@ -55,7 +55,6 @@ function sourcesFor(brief: InputBrief, input: RunInput): SourceKind[] {
 
 /** LLM0: RunInput (+ screenshots, voice transcripts, personas) → InputBrief on runs.normalized_input. */
 export async function normalizeStep(runId: string): Promise<NormalizeCheckpoint> {
-  'use step';
   const done = await getCheckpoint<NormalizeCheckpoint>(runId, StepKey.normalize);
   if (done) return done;
 

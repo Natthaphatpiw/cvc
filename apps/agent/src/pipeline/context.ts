@@ -8,17 +8,29 @@ import {
   type BrandProfile,
   type InputBrief,
   type MinMax,
-  type ProgressEvent,
   type ProgressEventInput,
   type RefData,
   type RunInput,
 } from '@cvc/schemas';
 import { isThaiText, normalizeHandle } from '@cvc/thai';
-import { FatalError, getWritable } from 'workflow';
+import { WorkflowNonRetryableError } from '@upstash/workflow';
 import { demoStepDelayMs } from '../env';
-import { delay } from '../lib/async';
+import { delay, errorMessage } from '../lib/async';
 
 export const RUN_INACTIVE = 'run_inactive';
+
+/**
+ * Permanent failures throw WorkflowNonRetryableError: Upstash Workflow fails the run without retrying (and calls the
+ * failure function), and the inline runner does not retry it either. RUN_INACTIVE (cancelled or already finished) is
+ * one of them, but it ends the run quietly in both runners.
+ */
+export function isNonRetryable(err: unknown): boolean {
+  return err instanceof WorkflowNonRetryableError || (err instanceof Error && err.name === 'WorkflowNonRetryableError');
+}
+
+export function isRunInactive(err: unknown): boolean {
+  return errorMessage(err) === RUN_INACTIVE;
+}
 
 export const MSG = {
   failedGeneric: 'การวิเคราะห์ล้มเหลว กรุณาลองใหม่อีกครั้ง',
@@ -37,7 +49,7 @@ export function store() {
 
 export async function getRunOrFail(runId: string): Promise<RunRecord> {
   const run = await getAgentStore().getRun(runId);
-  if (!run) throw new FatalError(`run ${runId} not found`);
+  if (!run) throw new WorkflowNonRetryableError(`run ${runId} not found`);
   return run;
 }
 
@@ -48,7 +60,7 @@ export function isTerminal(run: RunRecord): boolean {
 /** Stops the pipeline (without retries) once a run was cancelled or already finished. */
 export async function loadActiveRun(runId: string): Promise<RunRecord> {
   const run = await getRunOrFail(runId);
-  if (isTerminal(run)) throw new FatalError(RUN_INACTIVE);
+  if (isTerminal(run)) throw new WorkflowNonRetryableError(RUN_INACTIVE);
   return run;
 }
 
@@ -69,46 +81,24 @@ export async function putCheckpoint(
 // progress
 // ---------------------------------------------------------------------------------------------
 
-async function writeWorkflowStream(event: ProgressEvent): Promise<void> {
-  try {
-    const writer = getWritable<ProgressEvent>({ namespace: 'progress' }).getWriter();
-    try {
-      await writer.write(event);
-    } finally {
-      writer.releaseLock();
-    }
-  } catch {
-    // Not running inside a workflow step (inline mode) or the stream is busy; the store is the source of truth.
-  }
-}
-
-export async function closeWorkflowStream(): Promise<void> {
-  try {
-    await getWritable<ProgressEvent>({ namespace: 'progress' }).close();
-  } catch {
-    // inline mode or already closed
-  }
-}
-
 /**
  * Appends a durable progress event and mirrors stage / status / pct onto the run row (polling fallback).
- * Throws FatalError(RUN_INACTIVE) when the run was cancelled meanwhile so the pipeline stops.
+ * Throws a non-retryable RUN_INACTIVE error when the run was cancelled meanwhile so the pipeline stops.
  */
 export async function emitProgress(runId: string, e: ProgressEventInput): Promise<void> {
   const s = getAgentStore();
   const run = await s.getRun(runId);
-  if (!run || isTerminal(run)) throw new FatalError(RUN_INACTIVE);
-  const event = await s.appendProgress(runId, { ...e, pct: Math.round(e.pct) });
+  if (!run || isTerminal(run)) throw new WorkflowNonRetryableError(RUN_INACTIVE);
+  await s.appendProgress(runId, { ...e, pct: Math.round(e.pct) });
   if (e.stage !== 'done' && e.status !== 'failed') {
     try {
       await s.updateRun(runId, { status: STAGE_TO_STATUS[e.stage], stage: e.stage, progressPct: Math.round(e.pct) });
     } catch (err) {
       // A cancel that landed after the read above wins: the store refuses to put a terminal run back to running.
-      if (err instanceof StoreError && err.code === 'conflict') throw new FatalError(RUN_INACTIVE);
+      if (err instanceof StoreError && err.code === 'conflict') throw new WorkflowNonRetryableError(RUN_INACTIVE);
       throw err;
     }
   }
-  await writeWorkflowStream(event);
 }
 
 export async function addWarnings(runId: string, warnings: readonly string[]): Promise<void> {
@@ -235,9 +225,9 @@ export function briefOf(run: RunRecord): InputBrief {
 }
 
 export async function loadBrandOrFail(run: RunRecord): Promise<BrandProfile> {
-  if (!run.brandProfileId) throw new FatalError('brand profile missing');
+  if (!run.brandProfileId) throw new WorkflowNonRetryableError('brand profile missing');
   const brand = await getAgentStore().getBrandProfile(run.brandProfileId);
-  if (!brand) throw new FatalError('brand profile missing');
+  if (!brand) throw new WorkflowNonRetryableError('brand profile missing');
   return brand;
 }
 

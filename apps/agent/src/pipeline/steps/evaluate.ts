@@ -35,7 +35,6 @@ const NOT_EVALUATED = 'not_evaluated';
 
 /** Freezes the list of creators to evaluate (gate 0b passed) and shows the first previews. */
 export async function planEvaluationStep(runId: string): Promise<{ batchCount: number }> {
-  'use step';
   const done = await getCheckpoint<EvaluatePlanCheckpoint>(runId, StepKey.evaluatePlan);
   if (done) return { batchCount: Math.ceil(done.creatorIds.length / BATCH_SIZE) };
 
@@ -69,7 +68,6 @@ export async function planEvaluationStep(runId: string): Promise<{ batchCount: n
 
 /** Injection screen + LLM2b evaluator + gate 0c for one batch of ≤ 5 creators. */
 export async function evaluateBatchStep(runId: string, batchIndex: number): Promise<{ evaluated: number; excluded: number }> {
-  'use step';
   const key = StepKey.evaluate(batchIndex);
   const done = await getCheckpoint<EvaluateCheckpoint>(runId, key);
   if (done) return { evaluated: done.evaluated, excluded: done.excluded };

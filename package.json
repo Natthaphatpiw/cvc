@@ -17,7 +17,8 @@
     "typecheck": "turbo run typecheck",
     "test": "turbo run test",
     "lint": "turbo run lint",
-    "db:test": "node scripts/test-migrations.mjs"
+    "db:test": "node scripts/test-migrations.mjs",
+    "qstash:dev": "npx @upstash/qstash-cli@2.40.12 dev"
   },
   "devDependencies": {
     "@electric-sql/pglite": "0.5.10",

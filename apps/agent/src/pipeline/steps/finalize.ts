@@ -3,7 +3,7 @@ import { dedupe } from '@cvc/cache';
 import type { RunRecord } from '@cvc/db';
 import { PRESETS, poolMedianScores } from '@cvc/scoring';
 import { FinalResult } from '@cvc/schemas';
-import { FatalError } from 'workflow';
+import { WorkflowNonRetryableError } from '@upstash/workflow';
 import { errorMessage } from '../../lib/async';
 import {
   buildAlternative,
@@ -19,7 +19,6 @@ import {
   RUN_INACTIVE,
   budgetState,
   campaignOf,
-  closeWorkflowStream,
   emitProgress,
   getCheckpoint,
   getRunOrFail,
@@ -77,25 +76,23 @@ async function completeRun(run: RunRecord, resultId: string, isPartial: boolean,
 
   const out: FinalizeCheckpoint = { resultId, status };
   await putCheckpoint(run.id, StepKey.finalize, out);
-  await closeWorkflowStream();
   return out;
 }
 
 /** Assemble FinalResult v1 → results + result_versions v1 → run completed | partial. */
 export async function finalizeStep(runId: string): Promise<FinalizeCheckpoint> {
-  'use step';
   const done = await getCheckpoint<FinalizeCheckpoint>(runId, StepKey.finalize);
   if (done) return done;
 
   const run = await getRunOrFail(runId);
   if (run.resultId) {
     if (run.status === 'completed' || run.status === 'partial') return { resultId: run.resultId, status: run.status };
-    if (isTerminal(run)) throw new FatalError(RUN_INACTIVE);
+    if (isTerminal(run)) throw new WorkflowNonRetryableError(RUN_INACTIVE);
     // A previous attempt saved the result and failed before finishing the run: finish it with the saved result.
     const [saved, events] = await Promise.all([store().getResult(run.resultId), store().listProgress(runId, 0)]);
     return completeRun(run, run.resultId, saved?.result.isPartial === true, !events.some((e) => e.stage === 'done'));
   }
-  if (isTerminal(run)) throw new FatalError(RUN_INACTIVE);
+  if (isTerminal(run)) throw new WorkflowNonRetryableError(RUN_INACTIVE);
 
   const s = store();
   const [brand, ref, rows, curate, discover, evidence, rank, evalPlan, enrich, budget] = await Promise.all([
@@ -134,7 +131,6 @@ export async function finalizeStep(runId: string): Promise<FinalizeCheckpoint> {
     await releaseDedupe(run.ownerId, run.inputHash);
     const out: FinalizeCheckpoint = { resultId: null, status: 'failed' };
     await putCheckpoint(runId, StepKey.finalize, out);
-    await closeWorkflowStream();
     return out;
   }
 
@@ -224,9 +220,8 @@ export async function finalizeStep(runId: string): Promise<FinalizeCheckpoint> {
   return completeRun(run, resultId, isPartial, true);
 }
 
-/** Marks a run failed (unless it already reached a terminal status, e.g. cancelled). */
-export async function failRunStep(runId: string, message: string): Promise<void> {
-  'use step';
+/** Marks a run failed (unless it already reached a terminal status, e.g. cancelled); safe to call more than once. */
+export async function markRunFailed(runId: string, message: string): Promise<void> {
   const s = store();
   const run = await s.getRun(runId);
   if (!run || isTerminal(run)) return;
@@ -234,5 +229,4 @@ export async function failRunStep(runId: string, message: string): Promise<void>
   await s.appendProgress(runId, { stage: run.stage ?? 'intake', status: 'failed', pct: run.progressPct, messageTh });
   await s.updateRun(runId, { status: 'failed', errorMessageTh: messageTh, completedAt: new Date().toISOString() });
   await releaseDedupe(run.ownerId, run.inputHash);
-  await closeWorkflowStream();
 }

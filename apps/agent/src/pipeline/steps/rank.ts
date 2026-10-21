@@ -73,7 +73,6 @@ function brandAudience(brand: BrandProfile): ScoringContext['brandAudience'] {
 
 /** Code ranking: semantic fit + scoreCandidates with the objective preset (§6). */
 export async function rankStep(runId: string): Promise<RankCheckpoint> {
-  'use step';
   const done = await getCheckpoint<RankCheckpoint>(runId, StepKey.rank);
   if (done) return done;
 

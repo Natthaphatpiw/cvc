@@ -1,11 +1,12 @@
 # TikTok KOL Matcher (Thai Market) — System Design & Architecture
 
 > **Project:** Convert Cake · AI Engineer Assessment — "TikTok KOL Matcher for Thai Market"
-> **Version:** 1.3 · **Date:** 2026-10-21 · **Status:** MVP สร้างแล้วใน repo นี้ (§17.5) · ส่วนที่เหลือเป็น production design ตาม roadmap (§17.3)
+> **Version:** 1.4 · **Date:** 2026-10-21 · **Status:** MVP สร้างแล้วใน repo นี้ (§17.5) · ส่วนที่เหลือเป็น production design ตาม roadmap (§17.3)
 > **Companion doc:** [`DESIGN.md`](./DESIGN.md) — design system, UI/UX และหน้าจอทั้งหมด (โทนสี/ฟอนต์ตาม Convert Cake) · [`docs/UI_CONTRACT.md`](./docs/UI_CONTRACT.md) — กฎ UI ที่ใช้จริง (ชนะ DESIGN.md เมื่อขัดกัน) · [`docs/CONTRACTS.md`](./docs/CONTRACTS.md) — สัญญาของแต่ละ package/app · [`docs/DEPLOYMENT.md`](./docs/DEPLOYMENT.md) — ตั้งค่า Vercel 3 projects
 >
 > ข้อมูลทุกตัว (เวอร์ชัน, ราคา, limit) ตรวจกับแหล่งจริง ณ 2026-10-21 · รายการที่ยังยืนยันไม่ได้ติดป้าย **[UNVERIFIED]** และมี spike รองรับ (§17.4) · SQL ใน §8.3–8.4 = `supabase/migrations/*.sql` ทุกตัวอักษร และผ่านการรันจริงบน Postgres 17 (PGlite + pgvector) ตามลำดับที่เขียนด้วย `npm run db:test` · Mermaid ทุกแผนภาพ parse ผ่าน mermaid 11/12
 >
+> **v1.4 changelog (คิวงาน):** durable orchestrator เปลี่ยนจาก Vercel Workflow SDK เป็น **Upstash Workflow บน QStash** (ADR-003) — `POST /api/agent/runs` แค่ใส่งานเข้าคิวแล้วตอบ `202` · QStash เรียก `POST /api/workflow/kol-match` ของ `agent` ครั้งละ 1 step (`serve` จาก `@upstash/workflow/nextjs`, `maxDuration = 800` ต่อ step) จึงไม่มี request ไหนรอ pipeline จนจบและไม่ชน timeout · flow control key `cvc-kol-match` · production ที่ไม่มี QStash ตอบ `503 queue_not_configured` (ไม่รัน inline) · progress อ่านจาก Postgres (SSE/polling) ไม่มี workflow stream · env ใหม่ `QSTASH_*`, `UPSTASH_WORKFLOW_URL`, `PIPELINE_RUNNER`, `PIPELINE_MAX_PARALLEL_RUNS` · changelog เวอร์ชันก่อนหน้าด้านล่างเป็นประวัติ ณ เวอร์ชันนั้น
 > **v1.3 changelog (ตรงกับ MVP ที่สร้างแล้ว):** monorepo เป็น npm workspaces + Turborepo (TypeScript 5.9.3, Node ≥ 22.13) และรายชื่อ packages จริง · `api`/`agent` เป็น Next.js 16 app ที่ mount Hono ใน catch-all route handler (เพราะ Workflow SDK ผูกกับ Next ผ่าน `withWorkflow`) · ชื่อ env vars ตาม `.env.example` (`API_DATABASE_URL`/`AGENT_DATABASE_URL`, LINE, Blob 2 stores, Upstash, OIDC) + `.env` ไฟล์เดียวที่ root · consultant layer (§6.10: expected KPIs, playbook, portfolio plan, next actions — ตัวเลขจาก code, LLM4 เขียนเฉพาะข้อความ) · `FinalResult` เพิ่ม `isDemo`, `headlineTh`, `consultantSummaryTh`, `plan`, `nextActions` และต่อคน `playbook`/`expectedKpis`/`nextActions` · migrations `20261021001000_consultant_layer` + `20261021001100_reference_data` · cache รูปครีเอเตอร์ลง Blob public · demo mode (§17.6) · สถานะ MVP cut
 > **v1.2 changelog (หลัง verification รอบ 2):** ข้อยกเว้น edge gate สำหรับ cron/internal/webhooks, bootstrap หลัง LINE login บน web + `ensureAppUser`, opt-out scrub ทันที (`private.scrub_creator`) + คำขอ 2 ขั้น, step/hook payload = IDs เท่านั้น + ลบ Apify dataset หลัง aggregate, ลบ uploads ที่ถูกทิ้ง, `DELETE /api/agent/results/:id`, `addedFromChat`/`redactedCreators`, relax 2 แบบ, เป้าต้นทุนตามจริง + budget guard 2 ขั้น, ประกาศผู้ประมวลผลต่างประเทศครบ, ตัวอย่างตัวเลขตรงสูตร
 > **v1.1 changelog (หลัง adversarial review 5 มุมมอง):** แก้ RLS/GRANT ของ service roles, ลำดับ migration, guest→LINE ใช้ claim secret, chat memory ผูกกับ result, dedupe แยกตามเจ้าของ, edge gate + public creator-media store, แบ่ง hard gates เป็น 3 ช่วง, สูตร demographics ต่อ marginal + missing-feature renormalization, ต้นทุน/latency ตามจริง, เพิ่ม MVP cut, setup guide, worked example, business impact และ glossary
@@ -46,7 +47,7 @@
 |---|---|---|
 | **จำนวน service** | **3 deployable services**: `web` (Next.js: Web + LIFF), `api` (System Backend), `agent` (AI Backend) + shared packages | งาน AI ทำงานนาน (หลายนาที), ใช้ deps หนัก และถือ secret ของผู้ให้บริการ scrape ส่วน auth/CRUD ต้องเร็วและ cold start ต่ำ แยกกันเพื่อ deploy/scale/กำหนดสิทธิ์ได้อิสระ โดยไม่แตกย่อยเกินจำเป็น (§3.2) |
 | **Agent framework** | **Mastra 1.x** (pin exact version) ไม่ใช้ LangChain.js | TS-native, สร้างบน AI SDK, เรียก **Responses API เป็นค่าเริ่มต้น** (gpt-6.1-sol บังคับใช้สำหรับ tools), memory แบบ thread-only, RAG/pgvector, guardrail processors, scorers, observability ครบ (ADR-002) |
-| **Durable orchestration** | **Vercel Workflow SDK** (`'use workflow'`/`'use step'`) เป็นตัว orchestrate ส่วน Mastra ใช้เฉพาะ Agent/Memory/Tools/Processors (ไม่ใช้ Mastra workflows) | pipeline ยาวเกิน function limit ได้, retry ราย step, resumable progress stream, native บน Vercel ไม่ต้องเพิ่ม vendor |
+| **Durable orchestration / คิวงาน** | **Upstash Workflow บน QStash** (`serve` + `context.run`): `POST /api/agent/runs` ใส่งานเข้าคิวแล้วตอบ `202` · QStash เรียก `/api/workflow/kol-match` ของ `agent` ทีละ step · Mastra ใช้เฉพาะ Agent/Memory/Tools/Processors (ไม่ใช้ Mastra workflows) | ไม่มี request ไหนรอ pipeline (ไม่ชน timeout) · แต่ละ step เป็น HTTP call แยกที่มีเวลา 800 s, retry และ flow control ของตัวเอง · progress อ่านจาก Postgres (ADR-003) |
 | **LLM หลัก** | **`gpt-6.1-sol`** ผ่าน **Responses API** · option `gpt-6-luna` สำหรับ extraction/evaluation ปริมาณมาก | Sol ไม่มี tool calling บน Chat Completions · context 1.05M · $2 / $0.10 cached / $10 ต่อ 1M tokens |
 | **ASR / Embeddings** | `gpt-transcribe` / `text-embedding-3-large` (`dimensions:1536`) | ใช้ของ OpenAI ทั้งหมดตามโจทย์ · 1536 dims อยู่ใน limit HNSW (≤2000) |
 | **Web search** | **OpenAI `web_search`** (hosted tool) เป็นหลัก + **Perplexity Search ผ่าน Vercel AI Gateway** สำหรับ query ไทยที่ต้องกรองภาษา/โดเมน | reasoning model ค้น+เปิดหน้า+อ้างอิงเองได้ · Perplexity กรอง `country`/ภาษา ราคา $5/1k |
@@ -158,19 +159,21 @@ Convert Cake ต้องการเครื่องมือช่วยท�
 | Streaming → `useChat` | `@mastra/ai-sdk` (`handleChatStream`) | ผ่าน adapter `@ai-sdk/langchain` หรือ LangGraph Agent Server |
 | Guardrails | processors: `PromptInjectionDetector`, `PIIDetector`, `ModerationProcessor`, `TokenCostControl` | สร้างเอง/middleware |
 | Observability / Evals | exporters (Langfuse, LangSmith, OTel, Braintrust…), scorers แบบ sampling | LangSmith-first |
-| Orchestration | มี workflow DSL แต่ **เราไม่ใช้** (ใช้ Vercel Workflow SDK เป็น durable shell; ยังไม่พบ integration ทางการระหว่าง Mastra ↔ Vercel Workflows **[UNVERIFIED]**) | StateGraph/interrupt (mature ที่สุด) |
+| Orchestration | มี workflow DSL แต่ **เราไม่ใช้** (ใช้ Upstash Workflow บน QStash เป็น durable shell และเรียก Mastra agent ภายใน `context.run`) | StateGraph/interrupt (mature ที่สุด) |
 | ข้อควรระวัง | ออก minor ถี่ (1.53.0 มี breaking), **supply-chain attack 2026-06-17** (~141 packages ถูกปล่อย patch อันตราย) | CVE-2025-68665 (แก้ใน `@langchain/core` ≥1.1.8) |
 
 **Decision:** **Mastra** (ใช้เฉพาะ Agent, Memory, Tools, Processors, RAG helpers, Scorers, Observability) เพราะทั้งระบบเป็น TS บน Vercel, ใช้ OpenAI Responses API ถูกต้องโดยไม่ต้องตั้งค่าเพิ่ม และ memory model ตรง requirement chat
 **Mitigation:** pin exact versions + lockfile, `npm ci --ignore-scripts`, `npm audit signatures`/provenance ใน CI, Renovate อัปเดตเฉพาะ release ที่ออกมาแล้ว > 7 วัน, ส่ง AI SDK provider instance เอง (`@ai-sdk/openai@4.x`) เพราะ router ฝัง `@ai-sdk/openai` 3.x ไว้, ห้ามใช้โค้ดใน `ee/`, ห่อ API ของ framework ไว้หลัง `packages/ai` (เปลี่ยน framework ได้)
 **Runner-up:** LangGraph.js (ต้องการ cyclic graph + time-travel debugging หรือ semver guarantee)
 
-### ADR-003 — Vercel Workflow SDK เป็น durable orchestrator
-- **ปัญหา:** pipeline เต็ม 4–9 นาที + เวลารอ webhook/HITL · รันใน request เดียวเสี่ยงชน 800s และ crash = เริ่มใหม่ทั้งหมด
-- **Decision:** `workflow` 5.2.3 (GA เม.ย. 2026) · **1 external effect ต่อ 1 `'use step'`** (retry อัตโนมัติ, run ไม่มีจำกัดเวลา, `getWritable()` stream ต่อได้หลัง refresh, hooks สำหรับ HITL/webhook) · เรียก Mastra agents ภายใน step โดยตั้ง `maxRetries: 0` ที่ model call ให้ Workflow เป็นเจ้าของ retry (กัน retry ซ้อน 3×2×2)
-- **Integration (MVP):** Workflow SDK ผูกกับ Next.js ผ่าน `withWorkflow()` จาก `workflow/next` ใน `apps/agent/next.config.ts` (ไม่มี adapter สำหรับ Hono) → `agent` จึงเป็น Next.js app (§3.5) · `start(kolMatchWorkflow, [{ runId }], { region: 'sin1' })` · ถ้า runtime ยังไม่พร้อม (dev/test) รันขั้นตอนเดียวกันแบบ inline ด้วย `runPipelineInline(runId)` หลังตอบ response (`after()`)
-- **Alternatives:** Mastra workflow + `@mastra/inngest`, Trigger.dev v4 (ถ้ามี headless browser กิน CPU นาน), Upstash Workflow
-- **ข้อจำกัด:** step ≤ function max duration · payload ≤ 50 MB (ส่ง ID/blob ref) · run metadata ไม่เข้ารหัส (ห้าม PII) · > 2,000 events/run replay ช้า · payload อ่านได้ 7 วันบน Pro และลบ on-demand ไม่ได้ ([Workflow pricing & limits](https://vercel.com/docs/workflows/pricing), [retention](https://vercel.com/docs/workflows/retention))
+### ADR-003 — Upstash Workflow บน QStash เป็น durable orchestrator (คิวงาน)
+- **ปัญหา:** pipeline เต็ม 4–9 นาที + เวลารอ webhook/HITL · ถ้ารันใน request เดียว (หรือใน `after()` ของ request ที่สร้าง run) จะชน function timeout 800 s, crash = เริ่มใหม่ทั้งหมด และไม่มีที่คุมจำนวนงานที่รันพร้อมกัน
+- **Decision (v1.4):** `@upstash/workflow` 1.4.0 + `@upstash/qstash` 2.12.1 · `POST /api/agent/runs` สร้าง run แล้ว `client.trigger({ url: <agent origin>/api/workflow/kol-match, body: { runId }, workflowRunId, retries: 3, flowControl: { key: 'cvc-kol-match', parallelism: PIPELINE_MAX_PARALLEL_RUNS }, label: 'kol-match' })` และตอบ `202` ทันที · QStash เรียก `app/api/workflow/kol-match/route.ts` (`serve` จาก `@upstash/workflow/nextjs`, `runtime = 'nodejs'`, `maxDuration = 800`) **ครั้งละ 1 step**: SDK replay ผลของ step ที่เสร็จแล้วจาก QStash รัน step ถัดไป 1 ตัว ส่งผลกลับให้ QStash แล้วจบ request · **1 external effect ต่อ 1 `context.run`** · เรียก Mastra agents ภายใน step โดยตั้ง `maxRetries: 0` ที่ model call ให้ QStash เป็นเจ้าของ retry (กัน retry ซ้อน)
+- **ทำไม Upstash Workflow:** (1) ไม่มี request ไหนรอ pipeline — ผู้ใช้ได้ `202` ทันทีที่งานเข้าคิว แล้วติดตามผ่าน polling/SSE (2) ทุก step เป็น HTTP call ของตัวเอง เวลา 800 s จึงนับต่อ step ไม่ใช่ต่อทั้ง run (3) retry ราย step (ค่าเริ่มต้น 3 ครั้งแบบ exponential backoff), `WorkflowNonRetryableError` สำหรับความผิดพลาดถาวร, `failureFunction`, DLQ + resume/restart จาก Upstash Console (4) flow control (`parallelism`) คุมจำนวน step ที่ทำพร้อมกันตาม OpenAI TPM/quota ของ provider งานที่เกินรอในคิวไม่หาย (5) ไม่ต้องมี build plugin หรือ directive (`withWorkflow`, `'use workflow'`) — endpoint เป็น route handler ธรรมดา และทดสอบบนเครื่องได้ด้วย QStash dev server (`npm run qstash:dev`)
+- **Runner:** `PIPELINE_RUNNER=auto` (default) → Upstash เมื่อมี `QSTASH_TOKEN` · ไม่มี token: นอก production ใช้ inline runner (`runPipelineInline` ใน `after()`, สำหรับ local/demo) · ใน production → `POST /runs` ตอบ `503 queue_not_configured` และบันทึก run เป็น `failed` (ไม่ fallback ไปรัน inline ใน production) · `GET /api/agent/health` รายงาน `runner` (`upstash`/`inline`/`unavailable`) และ `configured.queue`
+- **Security:** endpoint อยู่นอก `/api/agent` (proxy ของ web ไม่ forward, ไม่ใช้ `x-cvc-edge`) และรับเฉพาะคำขอที่ลงลายเซ็นของ QStash (`Upstash-Signature` ตรวจด้วย `QSTASH_CURRENT_SIGNING_KEY`/`QSTASH_NEXT_SIGNING_KEY`; SDK ไม่ตรวจถ้าไม่มี keys จึงตอบ `503` ใน production) · preview ผ่าน Deployment Protection ด้วย `x-vercel-protection-bypass` (`VERCEL_AUTOMATION_BYPASS_SECRET`) ที่แนบทั้งตอน trigger และใน QStash client ของ `serve` (SDK ไม่ส่งต่อ header `x-vercel-*` ให้ step ถัดไปเอง)
+- **Trade-offs / ข้อจำกัด:** vendor เพิ่ม 1 ราย และ QStash มีแค่ region EU/US (ทุก step มี hop ข้ามภูมิภาคไป `sin1`, step results ที่เป็น IDs ออกนอกประเทศ — §13.2) · overhead/cold start ต่อ step และ route function ถูกรันซ้ำตั้งแต่ต้นทุก call (code นอก `context.run` ต้อง deterministic ไม่มี side effect; ห้าม try/catch ครอบ `context.run` เพราะ SDK ใช้ `WorkflowAbort` จบ request หลังแต่ละ step) · step ≤ 800 s และ ≤ HTTP response สูงสุดของแผน Upstash (Free 15 นาที) · ผลของ step วิ่งผ่าน QStash ทุก call (message ≤ 1 MB บน Free, 10 MB บน Pay as You Go) → คืนแค่ IDs/counts · คิดเงินต่อ step: Free 1,000 steps/วัน (run หนึ่งราว 15–25 steps) → production ใช้ Pay as You Go ($1 ต่อ 100K steps) · deploy ใหม่ระหว่างรัน: step ถัดไปไปที่ deployment ใหม่บน production domain → ชื่อ/ลำดับ step ต้อง backward-compatible (ไม่งั้น SDK หยุดด้วย `Incompatible step name`) · QStash ขัดข้อง = run ใหม่เริ่มไม่ได้และ run ที่ค้างหยุดรอ (ไม่หาย) · ไม่มี durable stream ในตัว → progress อ่านจาก Postgres (§4.11) · run ที่รอ flow control นานเกิน 15 นาทีจะถูก `requeue-stuck` ปิด (§8.5) จึงต้องตั้ง parallelism ให้พอกับโหลด ([Upstash Workflow](https://upstash.com/docs/workflow/getstarted), [flow control](https://upstash.com/docs/workflow/features/flow-control), [pricing](https://upstash.com/pricing/workflow))
+- **Alternatives:** Vercel Workflow SDK (`workflow` 5.2.3 — ใช้ใน v1.3: ผูกกับ build ของ Next ผ่าน `withWorkflow`, payload ของ step อ่านได้ 7 วันบน Pro และลบ on-demand ไม่ได้) · Mastra workflow + `@mastra/inngest` · Trigger.dev v4 (ถ้ามี headless browser กิน CPU นาน) · รันใน `after()` ของ request (ชน timeout — ใช้เฉพาะ local/demo)
 
 ### ADR-004 — Model access
 - ทุก call ไป `gpt-6.1-sol` ใช้ **Responses API** · ผ่าน **Vercel AI Gateway** (`openai/gpt-6.1-sol`): budget (HTTP 402 เมื่อเกิน), failover `order: ['openai','azure']` (model เดิม), OIDC auth, ZDR ราย request ([AI Gateway](https://vercel.com/docs/ai-gateway/pricing))
@@ -204,7 +207,7 @@ Convert Cake ต้องการเครื่องมือช่วยท�
 | Full-stack preview | ได้ (`@vercel/related-projects` + protection bypass) | อัตโนมัติ |
 
 **Decision:** 3 projects · ย้ายไป Services ได้เมื่อ GA (เปลี่ยน config + auth ภายใน)
-**Runtime ภายในแต่ละ project (v1.3):** ทั้ง 3 project ใช้ framework preset **Next.js 16** · `api` และ `agent` เป็น Next.js app ที่ mount **Hono 4** ใน catch-all route handler (`handle()` จาก `hono/vercel`) แทน Hono แบบ standalone เพราะ Workflow SDK integrate กับ Next ผ่าน `withWorkflow` (`workflow/next`) และไม่มี Hono adapter · ใช้รูปแบบเดียวกันทั้ง `api` และ `agent` เพื่อให้ build/deploy/env loading เหมือนกัน (§3.5)
+**Runtime ภายในแต่ละ project (v1.3):** ทั้ง 3 project ใช้ framework preset **Next.js 16** · `api` และ `agent` เป็น Next.js app ที่ mount **Hono 4** ใน catch-all route handler (`handle()` จาก `hono/vercel`) แทน Hono แบบ standalone (v1.3 เลือกเพราะ Vercel Workflow SDK integrate กับ Next ผ่าน `withWorkflow`; ตั้งแต่ v1.4 คิวงานเป็น Upstash Workflow ซึ่ง endpoint เป็น route handler ธรรมดา `app/api/workflow/kol-match/route.ts` ข้าง Hono) · ใช้รูปแบบเดียวกันทั้ง `api` และ `agent` เพื่อให้ build/deploy/env loading เหมือนกัน (§3.5)
 
 ---
 
@@ -225,7 +228,7 @@ flowchart LR
   openai["OpenAI<br/>gpt-6.1-sol · gpt-transcribe<br/>embeddings · web_search · moderation"]
   data["Data providers<br/>ScrapeCreators · Apify · Firecrawl<br/>YouTube API · Perplexity (AI Gateway)<br/>→ TikTok One API / Graph API (prod)"]
   supa["Supabase<br/>Postgres + pgvector + Auth"]
-  infra["Vercel<br/>Workflow · Blob · AI Gateway<br/>Upstash Redis"]
+  infra["Vercel<br/>Blob · AI Gateway<br/>Upstash Redis · QStash (คิวงาน)"]
   planner --> web
   client --> web
   web <--> line
@@ -243,6 +246,7 @@ flowchart LR
   data -. "Apify webhook (signal)" .-> agent
   api --> infra
   agent --> infra
+  infra -. "QStash เรียก /api/workflow/kol-match ทีละ step" .-> agent
 ```
 
 ### 3.2 วิเคราะห์จำนวน service: ทำไม 3 ไม่ใช่ 1, 2 หรือ 5+
@@ -273,7 +277,7 @@ flowchart TB
   end
   subgraph V3["Vercel project: cvc-agent (sin1)"]
     AG["Hono · AI Backend<br/>runs · progress SSE · transcribe · results · rescore · chat"]
-    WF["Vercel Workflow<br/>kolMatchWorkflow / kolRefreshWorkflow"]
+    WF["Upstash Workflow endpoint<br/>/api/workflow/kol-match (serve)<br/>kol-refresh (phase 2)"]
     MA["Mastra<br/>agents · tools · memory · processors"]
     SC["packages/scoring<br/>(deterministic)"]
   end
@@ -285,6 +289,7 @@ flowchart TB
     BC[("Blob public<br/>creator-media/")]
   end
   EXT["OpenAI · AI Gateway · ScrapeCreators · Apify<br/>Firecrawl · YouTube API · LINE APIs"]
+  QS["Upstash QStash (EU/US)<br/>คิว · retry · flow control · DLQ"]
   W & L --> NEXT
   W & L --> IDB
   W & L -- "client upload (token จาก /api/uploads/token)" --> BP
@@ -293,7 +298,8 @@ flowchart TB
   NEXT -- "/api/agent/* + x-cvc-edge" --> AG
   NEXT -- "/api/* + x-cvc-edge" --> API
   API --> PG & R & BP & AUTH
-  AG -- "start / getRun" --> WF
+  AG -- "client.trigger / cancel" --> QS
+  QS -- "1 HTTP call ต่อ step (Upstash-Signature)" --> WF
   AG -- "chat" --> MA
   AG -- "rescore" --> SC
   WF --> MA
@@ -329,22 +335,22 @@ flowchart TB
 | Secrets | `SUPABASE_URL` (JWKS), `SUPABASE_SECRET_KEY`, `API_DATABASE_URL` (role `svc_api` ผ่าน Supavisor transaction pooler `:6543`), `LINE_LOGIN_CHANNEL_ID` / `LINE_LOGIN_CHANNEL_SECRET`, `LINE_MESSAGING_CHANNEL_SECRET`, `LINE_MESSAGING_CHANNEL_ACCESS_TOKEN`, `BLOB_PRIVATE_READ_WRITE_TOKEN` (private store), `UPSTASH_REDIS_REST_URL` / `UPSTASH_REDIS_REST_TOKEN` (หรือ `KV_REST_API_URL` / `KV_REST_API_TOKEN` ที่ Marketplace inject), `VERCEL_TEAM_SLUG` + `VERCEL_PROJECT_API` / `VERCEL_PROJECT_AGENT` (OIDC), `CRON_SECRET`, `EDGE_SHARED_SECRET`, `DEMO_MODE` · **ไม่ใช้** `POSTGRES_URL` ที่ Supabase integration inject (role `postgres`) |
 | SLA | p95 < 300 ms |
 
-#### `agent` — AI Backend (Next.js 16 + Hono 4 + Workflow SDK + Mastra)
+#### `agent` — AI Backend (Next.js 16 + Hono 4 + Upstash Workflow + Mastra)
 
 | หัวข้อ | รายละเอียด |
 |---|---|
-| Runtime | Next.js 16 app · Hono app (`basePath('/api/agent')`) mount ที่ `apps/agent/app/api/agent/[[...route]]/route.ts` ด้วย `handle()` จาก `hono/vercel` (`runtime = 'nodejs'`, `maxDuration = 800`) · `next.config.ts` = `withWorkflow(...)` จาก `workflow/next` · หน้า UI มีแค่ status page · port 3002 |
-| หน้าที่ | สร้าง/ติดตาม/ยกเลิก run · progress SSE · transcribe (ก่อนส่ง run) · result/rescore/relax/curate · chatbot · Apify webhook (signal → resume hook) · KOL refresh workflow · retention ของข้อมูล agent · KB ingest (admin) · creator opt-out |
+| Runtime | Next.js 16 app · Hono app (`basePath('/api/agent')`) mount ที่ `apps/agent/app/api/agent/[[...route]]/route.ts` ด้วย `handle()` จาก `hono/vercel` (`runtime = 'nodejs'`, `maxDuration = 800`) · workflow endpoint `app/api/workflow/kol-match/route.ts` (`serve` จาก `@upstash/workflow/nextjs`, `maxDuration = 800` ต่อ step) อยู่นอก Hono และนอก `/api/agent` · หน้า UI มีแค่ status page · port 3002 |
+| หน้าที่ | สร้าง run (ใส่คิว QStash ด้วย `client.trigger`) / ติดตาม / ยกเลิก (`client.cancel`) · รัน pipeline ทีละ step เมื่อ QStash เรียก · progress SSE · transcribe (ก่อนส่ง run) · result/rescore/relax/curate · chatbot · Apify webhook (signal → `client.notify`, phase 2) · KOL refresh workflow · retention ของข้อมูล agent · KB ingest (admin) · creator opt-out |
 | เป็นเจ้าของ schema | `analysis`, `kol`, `kb`, `mastra` (อ่าน `ref` + บาง column ของ `app.users`) |
-| Secrets | `OPENAI_API_KEY` (BYOK/ASR) · `USE_AI_GATEWAY` + `AI_GATEWAY_API_KEY` (local; บน Vercel ใช้ OIDC) · `OPENAI_MODEL_MAIN`, `OPENAI_MODEL_FAST`, `OPENAI_TRANSCRIBE_MODEL`, `OPENAI_EMBEDDING_MODEL`, `OPENAI_EMBEDDING_DIMENSIONS` · `SCRAPECREATORS_API_KEY`, `APIFY_TOKEN`, `APIFY_WEBHOOK_SECRET`, `FIRECRAWL_API_KEY` (+ `YOUTUBE_API_KEY`, `SUPADATA_API_KEY` phase 2) · `SUPABASE_URL` (JWKS), `AGENT_DATABASE_URL` (role `svc_agent` ผ่าน Supavisor `:6543`) · Upstash (`UPSTASH_REDIS_REST_*` หรือ `KV_REST_API_*`) · `BLOB_PRIVATE_READ_WRITE_TOKEN` (private) + `CREATOR_MEDIA_BLOB_READ_WRITE_TOKEN` (public) · `VERCEL_TEAM_SLUG` + `VERCEL_PROJECT_*` (OIDC) · `BUDGET_SOFT_USD` / `BUDGET_HARD_USD` · `LANGFUSE_*` · `CRON_SECRET`, `EDGE_SHARED_SECRET`, `DEMO_MODE` |
-| Function config | `maxDuration` 800 สำหรับทุก route ของ agent (ตั้งใน `route.ts` และ `vercel.json` → `functions["app/api/agent/**/*"]`) · แยก chat 300 s + memory 2–4 GB เมื่อวัดจริง (phase 2) · region `sin1` |
+| Secrets | `OPENAI_API_KEY` (BYOK/ASR) · `USE_AI_GATEWAY` + `AI_GATEWAY_API_KEY` (local; บน Vercel ใช้ OIDC) · `OPENAI_MODEL_MAIN`, `OPENAI_MODEL_FAST`, `OPENAI_TRANSCRIBE_MODEL`, `OPENAI_EMBEDDING_MODEL`, `OPENAI_EMBEDDING_DIMENSIONS` · `SCRAPECREATORS_API_KEY`, `APIFY_TOKEN`, `APIFY_WEBHOOK_SECRET`, `FIRECRAWL_API_KEY` (+ `YOUTUBE_API_KEY`, `SUPADATA_API_KEY` phase 2) · `SUPABASE_URL` (JWKS), `AGENT_DATABASE_URL` (role `svc_agent` ผ่าน Supavisor `:6543`) · Upstash (`UPSTASH_REDIS_REST_*` หรือ `KV_REST_API_*`) · `BLOB_PRIVATE_READ_WRITE_TOKEN` (private) + `CREATOR_MEDIA_BLOB_READ_WRITE_TOKEN` (public) · `VERCEL_TEAM_SLUG` + `VERCEL_PROJECT_*` (OIDC) · `BUDGET_SOFT_USD` / `BUDGET_HARD_USD` · `LANGFUSE_*` · `CRON_SECRET`, `EDGE_SHARED_SECRET`, `DEMO_MODE` · คิว: `QSTASH_TOKEN`, `QSTASH_CURRENT_SIGNING_KEY`, `QSTASH_NEXT_SIGNING_KEY` (+ `QSTASH_URL`, `UPSTASH_WORKFLOW_URL`, `PIPELINE_RUNNER`, `PIPELINE_MAX_PARALLEL_RUNS`) · preview ใช้ system env `VERCEL_AUTOMATION_BYPASS_SECRET` |
+| Function config | `maxDuration` 800 สำหรับทุก route ของ agent (ตั้งใน `route.ts` และ `vercel.json` → `functions["app/api/agent/**/*"]`) · workflow endpoint ตั้ง `maxDuration = 800` ใน `route.ts` ของตัวเองและ `vercel.json` → `functions["app/api/workflow/kol-match/route.ts"]` (เวลาต่อ 1 step ไม่ใช่ทั้ง run) · แยก chat 300 s + memory 2–4 GB เมื่อวัดจริง (phase 2) · region `sin1` |
 
 ### 3.5 Deployment topology & edge gate
 
 - **Monorepo:** npm workspaces + Turborepo (Git repo เดียว, `package-lock.json` ที่ root) → 3 Vercel projects (Root Directory = `apps/web`, `apps/api`, `apps/agent`, framework preset Next.js, Node.js 24.x) · เปิด "Skip deployments when there are no changes" ให้ project ที่ไม่เปลี่ยนข้าม build · ขั้นตอนตั้งค่าทั้งหมดอยู่ใน [docs/DEPLOYMENT.md](./docs/DEPLOYMENT.md)
-- **Runtime ของ `api`/`agent`:** Next.js 16 app ที่ mount Hono ใน catch-all route handler — `api`: `app/api/[[...route]]/route.ts` (`basePath('/api')`) · `agent`: `app/api/agent/[[...route]]/route.ts` (`basePath('/api/agent')`) · ทั้งคู่ใช้ `handle()` จาก `hono/vercel` · เหตุผล: Workflow SDK integrate กับ Next ผ่าน `withWorkflow` (`workflow/next`) และไม่มี Hono adapter (ADR-003, ADR-008) · `web` ยังใช้ `proxy.ts` เป็น edge gate เหมือนเดิม
+- **Runtime ของ `api`/`agent`:** Next.js 16 app ที่ mount Hono ใน catch-all route handler — `api`: `app/api/[[...route]]/route.ts` (`basePath('/api')`) · `agent`: `app/api/agent/[[...route]]/route.ts` (`basePath('/api/agent')`) · ทั้งคู่ใช้ `handle()` จาก `hono/vercel` · เหตุผล: v1.3 ใช้ Vercel Workflow SDK ที่ต้องมี `withWorkflow` ของ Next และคงรูปแบบนี้ไว้ (ADR-008) · v1.4 เพิ่ม route handler ของ Upstash Workflow `app/api/workflow/kol-match/route.ts` ข้าง Hono (ADR-003) · `web` ยังใช้ `proxy.ts` เป็น edge gate เหมือนเดิม
 - **Env loading:** local ใช้ `.env` ไฟล์เดียวที่ root ซึ่ง `next.config.ts` ของทุก app โหลดด้วย `loadEnvConfig(repoRoot, …, forceReload=true)` (ค่าที่ตั้งใน process ก่อนหน้ายังชนะไฟล์) · บน Vercel ไม่มีไฟล์ ใช้ env ของแต่ละ project · packages เป็น TS source ที่ Next compile ผ่าน `transpilePackages` (รายชื่อใน `apps/*/.transpile.json`)
-- **Region:** ทุก project `regions: ["sin1"]` ใน `apps/*/vercel.json` (ค่าเริ่มต้น `iad1` ต้องเปลี่ยน) · workflow `start(..., { region: 'sin1' })` · cron อยู่ใน `apps/api/vercel.json` และ `apps/agent/vercel.json`
+- **Region:** ทุก project `regions: ["sin1"]` ใน `apps/*/vercel.json` (ค่าเริ่มต้น `iad1` ต้องเปลี่ยน) · step ของ workflow รันใน function ของ `cvc-agent` (`sin1`) ส่วน QStash อยู่ EU หรือ US ตาม `QSTASH_URL` · cron อยู่ใน `apps/api/vercel.json` และ `apps/agent/vercel.json`
 - **Domain:** `kol.<convertcake-domain>` → `cvc-web` เท่านั้น · `api`/`agent` ไม่มี custom domain และใช้ middleware `requireEdge` (ตรวจ `x-cvc-edge` แบบ constant-time) กับ **route สาธารณะทั้งหมด** โดยมีข้อยกเว้นที่ตรวจ auth ของตัวเองแทน:
 
 | Route | เรียกจาก | Auth แทน `x-cvc-edge` | เรียกที่ |
@@ -352,8 +358,9 @@ flowchart TB
 | `/api/cron/*`, `/api/agent/cron/*` | Vercel Cron (เรียก production deployment ของ project ตรง ใส่ header เองไม่ได้) | `Authorization: Bearer ${CRON_SECRET}` | URL ของ project |
 | `/api/internal/*`, `/api/agent/internal/*` | service ↔ service | Vercel OIDC (`sub` = project พี่น้อง, environment เดียวกัน) | `API_ORIGIN` / `AGENT_ORIGIN` (preview ใช้ `withRelatedProject`) |
 | `/api/webhooks/line`, `/api/agent/webhooks/apify` | LINE / Apify | `x-line-signature` / secret + ตรวจซ้ำผ่าน Apify API | ลงทะเบียน URL เป็น `https://kol.<domain>/api/...` (ผ่าน proxy) |
+| `/api/workflow/kol-match` (agent) | QStash (Upstash Workflow) ครั้งละ 1 step | ลายเซ็น `Upstash-Signature` ตรวจใน `serve` ด้วย `QSTASH_CURRENT_SIGNING_KEY`/`QSTASH_NEXT_SIGNING_KEY` (production ไม่มี keys → `503`) · preview แนบ `x-vercel-protection-bypass` | origin ของ `cvc-agent` ตรง: `UPSTASH_WORKFLOW_URL` หรือ `https://$VERCEL_PROJECT_PRODUCTION_URL` / `https://$VERCEL_URL` (ไม่ผ่าน proxy) |
 
-`proxy.ts` ตอบ **404** ให้ path `internal`/`cron` ที่มาจากอินเทอร์เน็ต (ไม่ forward) เพื่อไม่ให้ edge header ถูกแนบให้คำขอจากภายนอก
+`proxy.ts` ตอบ **404** ให้ path `internal`/`cron` ที่มาจากอินเทอร์เน็ต (ไม่ forward) เพื่อไม่ให้ edge header ถูกแนบให้คำขอจากภายนอก · `/api/workflow/*` อยู่นอก `/api/agent/*` จึงไม่มีทางถูก forward ไป agent ผ่าน proxy
 - **Edge proxy** (rewrite ใน `vercel.json` อ่าน env ไม่ได้ จึงทำใน `proxy.ts`):
 
 ```ts
@@ -387,9 +394,11 @@ export const config = { matcher: ['/api/:path*'] };
 | จาก → ถึง | ช่องทาง | Auth |
 |---|---|---|
 | Browser → `api`/`agent` | HTTPS ผ่าน `web` proxy (same origin) | `Authorization: Bearer <Supabase access JWT>` (JWKS, `aud=authenticated`) + `x-cvc-edge` · SSE อ่านด้วย `fetch()`+ReadableStream (ไม่ใช้ `EventSource` เพราะส่ง header ไม่ได้) |
+| `agent` → QStash (`client.trigger`, `client.cancel`; phase 2 `client.notify`) | HTTPS REST ไป `QSTASH_URL` (EU ค่าเริ่มต้น / US) | `QSTASH_TOKEN` |
+| QStash → `agent` (`POST /api/workflow/kol-match`) | HTTPS ครั้งละ 1 step ไป origin ของ agent ตรง (ไม่ผ่าน proxy) · retry/flow control โดย QStash | `Upstash-Signature` (signing keys) · preview: `x-vercel-protection-bypass` |
 | `agent` → `api` (`/api/internal/notify`, `/api/internal/purge-anon-users`) | HTTPS | **Vercel OIDC** (`getVercelOidcToken()`) ตรวจ `iss/aud/sub` = project `cvc-agent`, environment เดียวกัน |
 | `api` → `agent` (`/api/agent/internal/claim-runs`, `purge-user`, `export-user`) | HTTPS | Vercel OIDC (`sub` = project `cvc-api`) |
-| Apify → `agent` webhook | HTTPS (ผ่าน `https://kol.<domain>/api/agent/webhooks/apify`) | secret + **ใช้เป็นสัญญาณเท่านั้น**: ไม่เชื่อ body, ตรวจ **สถานะ** จาก Apify API ด้วย token ของเรา (`external_run_id` จาก `kol.provider_jobs`) แล้ว `resumeHook(token, { externalRunId, status })` แบบ idempotent (ไม่ส่ง dataset ผ่าน hook — step `aggregateComments` เป็นผู้ดึงและลบ) |
+| Apify → `agent` webhook | HTTPS (ผ่าน `https://kol.<domain>/api/agent/webhooks/apify`) | secret + **ใช้เป็นสัญญาณเท่านั้น**: ไม่เชื่อ body, ตรวจ **สถานะ** จาก Apify API ด้วย token ของเรา (`external_run_id` จาก `kol.provider_jobs`) แล้วปลุก run ที่รออยู่ด้วย `client.notify({ eventId, eventData: { externalRunId, status } })` แบบ idempotent (phase 2; workflow รอด้วย `context.waitForEvent`) (ไม่ส่ง dataset ผ่าน hook — step `aggregateComments` เป็นผู้ดึงและลบ) |
 | LINE → `api` webhook | HTTPS | `x-line-signature` (HMAC-SHA256 ด้วย channel secret) |
 | Services → Postgres | Supavisor transaction pooler `:6543` (`API_DATABASE_URL` / `AGENT_DATABASE_URL`) | DB role ต่อ service (`svc_api`, `svc_agent`) · `prepare:false`, `max:1` ต่อ instance |
 
@@ -702,50 +711,58 @@ flowchart TD
 
 > Code รวม hints + `playbookText` เป็น `Recommendation.playbook` และเติม placeholder `{{metric:…}}` (เช่น `er`, `median_views`, `fee`, `cpv`, `expected_views`) ด้วยค่าที่จัดรูปแบบแล้ว · `PortfolioNarrative` ให้ `headlineTh`/`consultantSummaryTh` และ `plan.mixTh` (ถ้ามี) ส่วนตัวเลขใน `plan` ไม่เปลี่ยน
 
-### 4.9 Workflow skeleton (Vercel Workflow + Mastra agents)
+### 4.9 Workflow skeleton (Upstash Workflow + Mastra agents)
 
 ```ts
-// apps/agent/src/workflows/kol-match.workflow.ts
-// กฎ: step I/O = IDs / hashes / counts / flags เท่านั้น (Workflow เก็บ args + return ของทุก step ไว้ 7 วันบน Pro)
+// apps/agent/app/api/workflow/kol-match/route.ts — Upstash Workflow: QStash เรียก endpoint นี้ครั้งละ 1 step
+// กฎ: step I/O = IDs / hashes / counts / flags เท่านั้น (ผลของทุก step ถูกเก็บที่ QStash และส่งกลับมาทุก call)
 //     ข้อมูลจริง (InputBrief, transcript, evidence, BrandProfile, dossiers, FinalResult) อ่าน/เขียนที่ Postgres ภายใน step
-import { sleep } from 'workflow';
+//     route function ถูกรันซ้ำตั้งแต่ต้นทุก call → code นอก context.run ต้อง deterministic · ห้าม try/catch ครอบ context.run
+import { serve } from '@upstash/workflow/nextjs';
+import { WorkflowNonRetryableError } from '@upstash/workflow';
 
-export async function kolMatchWorkflow(input: { runId: string }) {
-  'use workflow';                                                         // deterministic: ห้าม I/O ตรงนี้
-  const { runId } = input;
-  const { reviewBrand, sources } = await normalizeInput(runId);          // LLM0 → เขียน runs.normalized_input
-  await Promise.all(sources.map(s => prefetchSource(runId, s)));         // 1 step ต่อ source → client_snapshots (ไม่มี return)
-  await summarizeSources(runId);                                          // quarantined map → evidence cards ใน DB
-  const { brandProfileId } = await runBrandAgent(runId);                 // LLM1 → brand_profiles
-  await validateBrand(runId, brandProfileId);                             // pure, ไม่ retry
-  if (reviewBrand) await Promise.race([awaitBrandReview(runId), sleep('24h')]); // HITL hook (payload = {edited: boolean})
-  const { queryCount } = await planQueries(runId, brandProfileId);       // LLM2a → queries ใน run_steps
-  await Promise.all(range(queryCount).map(i => fetchCandidates(runId, i)));
-  const { batchCount } = await gateAndPreScore(runId);                   // gate 0a + pre-score → candidates
-  await Promise.all(range(batchCount).map(b => enrichBatch(runId, b)));  // profile/videos + gate 0b
-  await aggregateComments(runId);                                         // top-15: ดึง dataset → aggregate ใน memory → ลบ dataset
-  await Promise.all(range(batchCount).map(b => evaluateBatch(runId, b))); // injection screen + LLM2b
-  await rankCandidates(runId);                                            // gate 0c + code + pairwise
-  const { resultId } = await curateAndAssemble(runId);                    // LLM4 + checks + assemble → results v1
-  await persistAndNotify(runId, resultId);                                // status + LINE notify
+export const runtime = 'nodejs';
+export const maxDuration = 800;                                           // ต่อ 1 step (1 HTTP call) ไม่ใช่ทั้ง run
+
+export const { POST } = serve<{ runId: string }>(async (context) => {
+  const { runId } = context.requestPayload;
+  const step = <T>(name: string, fn: () => Promise<T>) => context.run(name, fn); // ชื่อ step คงที่ข้าม deploy
+  const { reviewBrand, sources } = await step('normalize', () => normalizeInput(runId));          // LLM0 → runs.normalized_input
+  await Promise.all(sources.map(s => step(`prefetch:${s}`, () => prefetchSource(runId, s))));   // 1 step ต่อ source (ขนาน)
+  await step('summarize', () => summarizeSources(runId));                // quarantined map → evidence cards ใน DB
+  const { brandProfileId } = await step('brand', () => runBrandAgent(runId));                   // LLM1 → brand_profiles
+  await step('validate-brand', () => validateBrand(runId, brandProfileId)); // pure
+  if (reviewBrand) {                                                       // HITL: ปลุกด้วย client.notify (payload = {edited: boolean})
+    await context.waitForEvent('await-brand-review', `brand-review:${runId}`, { timeout: '24h' });
+  }
+  const { queryCount } = await step('plan-queries', () => planQueries(runId, brandProfileId));  // LLM2a → queries ใน run_steps
+  await Promise.all(range(queryCount).map(i => step(`fetch:${i}`, () => fetchCandidates(runId, i))));
+  const { batchCount } = await step('gate-prescore', () => gateAndPreScore(runId));             // gate 0a + pre-score → candidates
+  await Promise.all(range(batchCount).map(b => step(`enrich:${b}`, () => enrichBatch(runId, b))));  // profile/videos + gate 0b
+  await step('comments', () => aggregateComments(runId));                 // top-15: ดึง dataset → aggregate ใน memory → ลบ dataset
+  await Promise.all(range(batchCount).map(b => step(`evaluate:${b}`, () => evaluateBatch(runId, b)))); // injection screen + LLM2b
+  await step('rank', () => rankCandidates(runId));                        // gate 0c + code + pairwise
+  const { resultId } = await step('curate', () => curateAndAssemble(runId));                   // LLM4 + checks + assemble → results v1
+  await step('persist-notify', () => persistAndNotify(runId, resultId)); // status + LINE notify
   return { resultId };
-}
+}, {
+  // retry ของ step หมด หรือ step โยน WorkflowNonRetryableError → mark run failed + ลบ dedupe key (run เข้า DLQ ของ Upstash)
+  failureFunction: async ({ context, failResponse }) => { await markRunFailed(context.requestPayload.runId, failResponse); },
+});
 
-async function runBrandAgent(runId: string): Promise<{ brandProfileId: string }> {
-  'use step';
-  await budgetGuard(runId);                                               // INCRBYFLOAT budget:run:{runId} → soft $4 ลดฟีเจอร์ · hard $6 ⇒ FatalError → partial
+async function runBrandAgent(runId: string): Promise<{ brandProfileId: string }> {   // เรียกภายใน context.run เท่านั้น
+  const budget = await budgetGuard(runId);                                // INCRBYFLOAT budget:run:{runId} → soft $4 ลดฟีเจอร์
+  if (budget === 'hard') throw new WorkflowNonRetryableError('budget');   // hard $6 ก่อนมี BrandProfile → fail ทันที ไม่ retry
   await progress(runId, { stage: 'brand', status: 'started', pct: 30, messageTh: 'กำลังวิเคราะห์แบรนด์จากเว็บไซต์และ Facebook' });
   const cards = await loadEvidenceCards(runId);                           // อ่านจาก DB ภายใน step
   const res = await brandAgent.generate(brandPrompt(cards), {
-    structuredOutput: { schema: BrandProfileSchema }, maxRetries: 0,      // Workflow เป็นเจ้าของ retry
+    structuredOutput: { schema: BrandProfileSchema }, maxRetries: 0,      // QStash เป็นเจ้าของ retry (step ละ 3 ครั้ง)
     providerOptions: { openai: { reasoningEffort: 'medium', store: false, promptCacheKey: 'llm1-v1' } },
   });
   return { brandProfileId: await saveBrandProfile(runId, res.object) };   // คืนแค่ ID
 }
-runBrandAgent.maxRetries = 3;
 
-async function aggregateComments(runId: string): Promise<{ sampled: number }> {
-  'use step';
+async function aggregateComments(runId: string): Promise<{ sampled: number }> {      // เรียกภายใน context.run
   const jobs = await loadCommentJobs(runId);                              // external run ids จาก kol.provider_jobs
   for (const j of jobs) {
     const items = await apify.dataset(j.datasetId).listItems();          // raw อยู่ใน memory ของ step เท่านั้น
@@ -756,10 +773,8 @@ async function aggregateComments(runId: string): Promise<{ sampled: number }> {
 }
 
 async function progress(runId: string, e: ProgressEventInput) {          // เรียกจากใน step เท่านั้น
-  const w = getWritable<ProgressEvent>({ namespace: 'progress' }).getWriter();
-  try { await w.write({ ...e, at: new Date().toISOString() }); } finally { w.releaseLock(); }
-  await db.update(runs).set({ status: STAGE_TO_STATUS[e.stage], stage: e.stage, progressPct: e.pct })
-          .where(eq(runs.id, runId));                                     // polling fallback + requeue-stuck (updated_at ผ่าน trigger)
+  await store.appendProgress(runId, e);                                   // กำหนด seq + at → SSE/polling อ่านจากตรงนี้ (§4.11)
+  await store.updateRun(runId, { status: STAGE_TO_STATUS[e.stage], stage: e.stage, progressPct: e.pct }); // requeue-stuck ดู updated_at
 }
 ```
 
@@ -775,7 +790,7 @@ export const brandAgent = new Agent({
 });
 ```
 
-> **MVP (ใน repo):** workflow อยู่ที่ `apps/agent/src/pipeline/workflows/kol-match.ts` และ steps ที่ `apps/agent/src/pipeline/steps/*.ts` ตามลำดับ `normalizeStep` → `prefetchSourceStep` (website/facebook/tiktok ขนาน) → `collectEvidenceStep` → `brandStep` → `planQueriesStep` → `discoverStep` → `enrichBatchStep` ×n → `planEvaluationStep` → `evaluateBatchStep` ×n → `rankStep` → `curateStep` (consultant layer + LLM4) → `finalizeStep` (assemble + persist) · กฎเดียวกัน: step I/O = IDs/counts, ข้อมูลผ่าน `AgentStore` (`@cvc/db`), checkpoint ใน `analysis.run_steps` · ไม่มี HITL/pairwise/comment sampling (§17.5)
+> **MVP (ใน repo):** endpoint `apps/agent/app/api/workflow/kol-match/route.ts` → `handleKolMatchWorkflow` (`serve`) ใน `apps/agent/src/pipeline/workflows/kol-match.ts` ซึ่งส่ง `(name, fn) => context.run(name, fn)` ให้ `runKolMatch(runId, step)` ใน `src/pipeline/plan.ts` (plan เดียวกันใช้กับ inline runner) · steps อยู่ที่ `src/pipeline/steps/*.ts` ตามลำดับ `normalize` → `prefetch:<source>` (website/facebook/tiktok ขนาน) → `evidence` → `brand` → `plan-queries` → `discover` → `enrich:<n>` ×n → `plan-evaluation` → `evaluate:<n>` ×n → `rank` → `curate` (consultant layer + LLM4) → `finalize` (assemble + persist) · ชื่อ step ต้องคงที่ข้าม deploy · กฎเดียวกัน: step I/O = IDs/counts, ข้อมูลผ่าน `AgentStore` (`@cvc/db`), checkpoint ใน `analysis.run_steps` · step ที่พบว่า run ถูกยกเลิก/จบไปแล้วคืน `{ inactive: true }` แล้ว workflow เรียก `context.cancel()` · hard budget ก่อนมี BrandProfile โยน `WorkflowNonRetryableError` · ไม่มี HITL/pairwise/comment sampling (§17.5)
 
 ### 4.10 Model configuration & prompt rules
 
@@ -816,8 +831,9 @@ type ProgressEvent = {
 };
 ```
 
-- **Primary:** SSE `GET /api/agent/runs/:id/stream?startIndex=n` → proxy `getRun(id).getReadable({ namespace:'progress', startIndex })` · client อ่านด้วย `fetch()`+ReadableStream (ส่ง Bearer ได้) และจำ `seq` เพื่อ reconnect · route ตั้ง `maxDuration=800` และปิดเองที่ ~290 s แล้วให้ client ต่อด้วย `startIndex`
-- **Fallback:** polling `GET /api/agent/runs/:id` ทุก 2–3 วินาที (อ่าน `status/stage/progress_pct` ที่ step เขียนทุกครั้ง)
+- **ที่มาของ event:** step เขียน `ProgressEvent` ลง Postgres ผ่าน `AgentStore.appendProgress` (กำหนด `seq`/`at`; เก็บใน `analysis.run_steps`) และอัปเดต `runs.status/stage/progress_pct` · **ไม่มี workflow stream** — Upstash Workflow ไม่มี durable stream ในตัว และแต่ละ step จบใน request ที่ QStash เรียก ไม่ได้ต่อถึง browser
+- **Primary:** SSE `GET /api/agent/runs/:id/stream?startIndex=n` วนอ่าน `listProgress(runId, after)` ทุก ~1 s แล้วส่งเป็น event · client อ่านด้วย `fetch()`+ReadableStream (ส่ง Bearer ได้) และจำ `seq` เพื่อ reconnect · route ปิดเองที่ ~290 s (event `end` พร้อม `nextSeq`) แล้วให้ client ต่อด้วย `startIndex = nextSeq + 1`
+- **Fallback:** polling `GET /api/agent/runs/:id/events?after=` (MVP ใช้ทางนี้ทุก 2 s) หรือ `GET /api/agent/runs/:id` ทุก 2–3 วินาที (อ่าน `status/stage/progress_pct` ที่ step เขียนทุกครั้ง)
 - **ETA:** คำนวณจาก `analysis.run_steps.latency_ms` ในอดีต
 - **UX แบบ progressive:** timeline → brand card → จำนวน candidate → KOL preview → result · LINE user ปิดแอปได้และรับ push เมื่อเสร็จ
 
@@ -825,18 +841,22 @@ type ProgressEvent = {
 
 | สถานการณ์ | การจัดการ |
 |---|---|
-| Provider 429/5xx | `RetryableError` + `retryAfter` → หลัง retry หมด สลับ fallback provider |
-| Provider 4xx (URL ผิด, page private) | `FatalError` เฉพาะ source นั้น → `sourcesUnavailable[]` แล้วเดินต่อ |
-| LLM schema fail | repair ≤ 2 (ส่ง error แบบ compact) → `FatalError` → item `not_evaluated`/`lowConfidence` |
-| Retry ซ้อน | model call `maxRetries: 0`; Workflow retry 3 · repair แยกนับ |
+| Provider 429/5xx | สลับ fallback provider ภายใน adapter ก่อน · ถ้ายังล้ม โยน error ใน `context.run` → QStash retry step นั้น (ค่าเริ่มต้น 3 ครั้ง exponential backoff; ตั้ง `retries`/`retryDelay` ที่ `client.trigger`) · provider บอกเวลารอได้ → `WorkflowRetryAfterError(message, retryAfter)` |
+| Provider 4xx (URL ผิด, page private) | ไม่โยน error: step ของ source นั้นบันทึก `sourcesUnavailable[]` แล้วคืนตามปกติ (ไม่ retry) แล้วเดินต่อ |
+| LLM schema fail | repair ≤ 2 (ส่ง error แบบ compact) → ถ้ายังไม่ผ่าน item เป็น `not_evaluated`/`lowConfidence` แล้ว step คืนตามปกติ (ไม่ทำให้ทั้ง run ล้ม) |
+| Retry ซ้อน | model call `maxRetries: 0`; QStash retry ต่อ step 3 ครั้ง · repair แยกนับ |
 | Step ซ้ำ (at-least-once) | step อ่าน checkpoint `analysis.run_steps(run_id, step_key)` ก่อน · side effect ใช้ idempotency key · Redis lock `lock:step:{runId}:{step}` |
+| ล้มถาวร / retry หมด | `WorkflowNonRetryableError` (จาก `@upstash/workflow`) = ไม่ retry · เมื่อ retry ครบหรือเจอ non-retryable → `failureFunction` บันทึก run `failed` + ข้อความไทย + ลบ dedupe key (no-op ถ้า run จบไปแล้ว) · run อยู่ใน DLQ ของ Upstash (resume/restart ได้จาก console) |
+| Code ของ workflow | ห้าม try/catch ครอบ `context.run` (SDK จบ request หลังแต่ละ step ด้วย `WorkflowAbort`) · code นอก step ต้อง deterministic เพราะถูกรันซ้ำทุก call · หลีกเลี่ยงการโยน error ธรรมดาก่อน step แรก (SDK เตือนตอนตรวจสิทธิ์ request) |
+| งานล้น | flow control `{ key: 'cvc-kol-match', parallelism: PIPELINE_MAX_PARALLEL_RUNS }` (default 3) → QStash ทำพร้อมกันไม่เกิน N step ที่เหลือรอในคิว (ผู้ใช้ไม่ได้ 429) · run ที่รอเกิน 15 นาทีจะถูก `requeue-stuck` ปิด จึงต้องตั้ง N ให้พอกับโหลด |
+| ไม่มี QStash | production: `POST /runs` → `503 queue_not_configured` + run `failed` (ไม่ fallback inline) · endpoint ที่ไม่มี signing keys ตอบ `503` · local/demo: inline runner |
 | งบเกิน | `budget:run:{runId}` (INCRBYFLOAT ก่อน paid call): **soft $4** → ข้าม pairwise, critic, web_search เพิ่มเติม · **hard $6** → หยุด, ส่งผล partial จากข้อมูลที่มี |
 | Privacy ของ payload | step args/returns และ hook payload = IDs/สถิติเท่านั้น · raw provider data (คอมเมนต์, โพสต์ดิบ) อยู่ใน memory ของ step แล้วทิ้ง · `ProgressEvent.partial` ห้ามมี transcript/ข้อความจากรูป |
 | Candidate < 10 หลัง gates | ภายใน run: ผ่อน gate 0a อัตโนมัติ (follower ±50%, active 60 วัน ผ่าน `GateContext.activeDays`) ก่อน enrich และ gate 0b ใช้เงื่อนไขที่ผ่อนแล้วชุดเดียวกัน (ไม่ตัดซ้ำ) + `caveatsTh` · ภายหลัง: `/relax` (gate 0b/0c) หรือรันใหม่ด้วยเงื่อนไขกว้างขึ้น |
 | LLM4 ล้มเหลว | ไม่ทิ้ง KOL (§4.7) |
-| ผู้ใช้ยกเลิก | `POST /api/agent/runs/:id/cancel` → cancel run + `cancelled` + ลบ dedupe key |
+| ผู้ใช้ยกเลิก | `POST /api/agent/runs/:id/cancel` → `cancelled` + ลบ dedupe key → `client.cancel(workflowRunId)` · step ที่กำลังทำเห็นสถานะแล้วหยุด (`context.cancel()`, ไม่เข้า DLQ) |
 | HITL ไม่ตอบ | timeout 24 ชม. → ใช้ profile เดิม (requeue-stuck ไม่แตะ `awaiting_review`) |
-| Deploy ใหม่ระหว่างรัน | run ผูก deployment เดิมจนจบ · rollback ต้อง cancel run เก่าเอง |
+| Deploy ใหม่ระหว่างรัน | production: step ถัดไปถูกเรียกที่ deployment ใหม่ (production domain) → ชื่อ/ลำดับ step ต้อง backward-compatible ไม่งั้น SDK หยุดด้วย `Incompatible step name` · เปลี่ยน pipeline แบบไม่เข้ากัน = รอคิวว่างหรือ cancel run เก่าก่อน deploy · preview ผูกกับ URL ของ deployment นั้น |
 
 ### 4.13 ตัวอย่าง end-to-end (แบรนด์สมมติ) + โครง Loom
 
@@ -1201,7 +1221,7 @@ export const toTsQuery = (q: string) =>
 2. **full-text:** group ต่อ creator ก่อน limit (กัน creator ที่มี chunk เยอะกินโควตา) · กรอง kind + `valid_until`
 3. **semantic:** ดึง chunk ใกล้สุด `match_count × 40` → group ต่อ creator (best chunk) · คืน `max_similarity` สำหรับ sub-score `semantic`
 4. RRF (k=50) → `score`
-5. ตั้ง `hnsw.iterative_scan = relaxed_order` + `hnsw.ef_search = 200` **ที่ระดับ function** (transaction pooler ไม่รักษา session GUC)
+5. ตั้ง `hnsw.iterative_scan = relaxed_order` + `hnsw.ef_search = 200` **ภายใน function ตอนรัน** ด้วย `set_config(..., true)` (มีผลทั้ง transaction เพราะ transaction pooler ไม่รักษา session GUC) · ห้ามใช้ `create function ... set hnsw.*` เพราะบน Supabase migration รันด้วย role ที่ไม่ใช่ superuser จะ error 42501 `permission denied to set parameter`
 
 App เรียก 1 ครั้งต่อ criterion แล้วรวมแบบถ่วงน้ำหนัก (multi-vector) · `find_similar_kols` ใช้ profile embedding ของ seed + `exclude_ids` = seed + KOL ใน result
 
@@ -1210,7 +1230,7 @@ App เรียก 1 ครั้งต่อ criterion แล้วรวม�
 | Pipeline | Trigger | ขั้นตอน |
 |---|---|---|
 | Inline enrichment | ทุก run | upsert `kol.creators` (key = `platform_user_id`; handle เปลี่ยนได้) / videos / snapshots → video summaries (deterministic) → segment + embed (batch) → `kb.chunks` (dedupe ต่อเจ้าของ chunk) |
-| `kolRefreshWorkflow` | Vercel Cron 02:00 เวลาไทย | ตาม `refresh_priority` → Apify async + webhook (signal) → upsert snapshots → re-embed เฉพาะที่เปลี่ยน (Batch API) |
+| `kolRefreshWorkflow` (Upstash Workflow, phase 2) | Vercel Cron 02:00 เวลาไทย → `client.trigger` | ตาม `refresh_priority` → Apify async + webhook (signal) → upsert snapshots → re-embed เฉพาะที่เปลี่ยน (Batch API) |
 | KB ingestion | admin (`/api/agent/admin/kb/documents`) | parse → chunk → embed → `kb.chunks` |
 
 ---
@@ -1924,8 +1944,10 @@ create or replace function kol.match_creators(
   full_text_weight float default 1.0, semantic_weight float default 1.0, rrf_k int default 50,
   exclude_ids uuid[] default '{}'
 ) returns table (creator_id uuid, score float, max_similarity float)
-language sql stable set search_path = ''
-set hnsw.iterative_scan = 'relaxed_order' set hnsw.ef_search = '200' as $$
+language sql volatile set search_path = '' as $$
+  -- pgvector iterative HNSW scan, set per transaction at run time: a function-level SET on hnsw.* needs superuser
+  -- on Supabase when the vector library is not loaded yet in the migration session.
+  select set_config('hnsw.iterative_scan', 'relaxed_order', true), set_config('hnsw.ef_search', '200', true);
   with eligible as (
     select c.id from kol.creators c
     where c.country_code = 'TH' and not c.opted_out and not c.is_blocked and not c.possible_minor
@@ -2265,8 +2287,8 @@ insert into ref.kpi_benchmarks (objective, category_id, tier, metric, p25, p50, 
 | Job | Owner | Schedule (เวลาไทย) | ทำอะไร |
 |---|---|---|---|
 | `retention` | agent (`/api/agent/cron/retention`) | ทุกวัน 03:00 | guest runs/results หมดอายุ: `memory.deleteThread()` ทุก session ก่อน → ลบ runs/results · ลบ `raw/` > 30 วัน · ลบ **ทุก blob ใต้ `uploads/` ที่ `uploadedAt` > 24 ชม.** (`list({prefix:'uploads/'})` ไม่ว่าจะผูกกับ run หรือไม่ — รวมไฟล์จากฟอร์มที่ถูกทิ้ง) แล้ว mark `run_assets.status='deleted'` · purge creator ไม่ได้ refresh 12 เดือน (เก็บ opt-out hash) · session idle > 24 ชม. → `expired` + deleteThread · จากนั้นเรียก api `/api/internal/purge-anon-users` |
-| `requeue-stuck` | agent | ทุก 5 นาที | run ที่ `updated_at` เกิน 15 นาที **และ status ≠ `awaiting_review`** → ตรวจ workflow → `failed`/`partial` |
-| `kol-refresh` | agent (`/api/agent/cron/kol-refresh`) | ทุกวัน 02:00 | `kolRefreshWorkflow` |
+| `requeue-stuck` | agent | ทุก 5 นาที | run ที่ `updated_at` เกิน 15 นาที **และ status ≠ `awaiting_review`** → `client.cancel(workflowRunId)` → `failed`/`partial` (นับรวม run ที่ยังรอ flow control ในคิว QStash) |
+| `kol-refresh` | agent (`/api/agent/cron/kol-refresh`) | ทุกวัน 02:00 | `client.trigger` ของ `kolRefreshWorkflow` (Upstash Workflow) |
 | `app-purge` | api (`/api/cron/purge`) | ทุกวัน 03:30 | shares หมดอายุ, notifications/audit เก่า > 180 วัน |
 | `purge-anon-users` | api (internal, OIDC) | หลัง retention | ลบ anonymous auth users ที่ไม่มี run เหลือ (`SUPABASE_SECRET_KEY` อยู่ที่ api) |
 
@@ -2548,7 +2570,7 @@ sequenceDiagram
 | GET | `/api/me` | Bearer | profile + preferences |
 | POST | `/api/me/consents` | Bearer (LINE) | บันทึก notice ack / push consent |
 | GET | `/api/me/export` | Bearer (LINE) | PDPA export (app data + agent `export-user`) |
-| DELETE | `/api/me` | Bearer | PDPA ลบบัญชี + agent `purge-user` (ยกเว้นประวัติ Workflow ที่หมดอายุเองตาม retention ของ Vercel) |
+| DELETE | `/api/me` | Bearer | PDPA ลบบัญชี + agent `purge-user` (ยกเว้น log ของ workflow run ใน Upstash ซึ่งมีแค่ IDs และหมดอายุเองตาม retention ของ Upstash) |
 | POST | `/api/uploads/token` | Bearer | Blob `handleUpload` (ตรวจ prefix `uploads/{sub}/`) |
 | GET | `/api/personas`, `/api/categories` | – | รายการ (cache 1 ชม.) |
 | GET | `/api/history?cursor=` | Bearer (LINE) | ผ่าน `app.v_user_history` |
@@ -2600,7 +2622,7 @@ sequenceDiagram
   participant W as web (proxy)
   participant AG as agent
   participant RD as Upstash Redis
-  participant WF as Workflow runtime
+  participant WF as Upstash Workflow (QStash)
   participant P as Providers / OpenAI
   participant DB as Supabase
   participant API as api
@@ -2612,28 +2634,29 @@ sequenceDiagram
     AG-->>W: 202 {runId เดิม, status}
   else run ใหม่
     AG->>DB: insert analysis.runs (queued) + run_assets
-    AG->>WF: start(kolMatchWorkflow, [{runId}], {region:'sin1'})
+    AG->>WF: client.trigger(url /api/workflow/kol-match, body {runId}, flowControl cvc-kol-match)
     AG->>DB: update runs.workflow_run_id · SET dedupe key
-    AG-->>W: 202 {runId, status, claimSecret?}
+    AG-->>W: 202 {runId, status, claimSecret?} ทันที ไม่รอ pipeline
   end
   W->>AG: GET /api/agent/runs/:id/stream?startIndex=0 (fetch SSE)
-  loop ทุก stage
-    WF->>P: LLM0 · prefetch · LLM1 · LLM2 · LLM3 · LLM4
-    WF->>DB: update runs.status / stage / progress_pct
-    WF-->>AG: progress events (durable stream)
-    AG-->>W: SSE events (brand card, candidates, previews)
+  loop ทุก step (QStash เรียก agent ครั้งละ 1 step)
+    WF->>AG: POST /api/workflow/kol-match + Upstash-Signature
+    AG->>P: LLM0 · prefetch · LLM1 · LLM2 · LLM3 · LLM4
+    AG->>DB: run_steps checkpoint · progress · runs.status / stage / progress_pct
+    AG-->>WF: 200 ผลของ step (IDs/counts) แล้วจบ request
+    AG-->>W: SSE events อ่านจาก Postgres (brand card, candidates, previews)
   end
   opt options.reviewBrand
     W->>AG: POST /api/agent/runs/:id/review (BrandProfile)
-    AG->>WF: resume hook
+    AG->>WF: client.notify(eventId) ปลุก waitForEvent
   end
   opt Apify async job
     P->>AG: POST /api/agent/webhooks/apify (signal)
     AG->>P: GET run status (Apify API, token ของเรา)
-    AG->>WF: resume hook {externalRunId, status} (token จาก kol.provider_jobs, ใช้ครั้งเดียว)
+    AG->>WF: client.notify {externalRunId, status} (eventId จาก kol.provider_jobs, ใช้ครั้งเดียว)
   end
-  WF->>DB: results (v1) + candidates · runs.status=completed
-  WF->>API: POST /api/internal/notify (OIDC)
+  AG->>DB: results (v1) + candidates · runs.status=completed (step สุดท้าย)
+  AG->>API: POST /api/internal/notify (OIDC)
   API->>API: LINE push (ถ้า opt-in + friend)
   AG-->>W: event done {resultId}
   W->>W: navigate /results/:resultId (LIFF: /liff/results/:resultId)
@@ -2672,14 +2695,14 @@ sequenceDiagram
 | คอมเมนต์ของผู้ชม | บุคคลที่สาม | Legitimate interest (aggregate) | **ไม่เก็บ uniqueId/avatar/ข้อความ** (aggregate ใน memory ของ step แล้วทิ้ง · ไม่อยู่ใน Blob, step/hook payload ของ Workflow) · ลบ Apify dataset ทันทีหลัง aggregate · ไม่อนุมานรายบุคคล | ไม่เก็บ (เฉพาะสถิติ) |
 | ไฟล์ที่อัปโหลดแต่ไม่ได้ส่ง run | ผู้ใช้ | ให้บริการ | – | ลบภายใน 24 ชม. (retention ลบทุก blob ใต้ `uploads/` ที่อายุ > 24 ชม.) |
 | Guest runs/chat | ผู้ใช้นิรนาม | ให้บริการ | ไม่มีตัวตน | 7 วัน (thread ลบด้วย retention job) |
-| Workflow run data (Vercel) | ผสม | ให้บริการ | step args/returns + hook payload = IDs, stage, counts, flags เท่านั้น (ไม่มี transcript/ข้อความจากรูป/raw provider data) · ตั้ง `experimental_retention: 0` **[UNVERIFIED ใน 5.2.3 → SP6]** | payload ≤ 7 วัน (Pro) · metadata ≤ 1 ปี · ลบ on-demand ไม่ได้ (เปิดเผยใน privacy notice) |
+| Workflow run data (Upstash QStash, EU/US) | ผสม | ให้บริการ | trigger body = `{ runId }` · step results + event payload = IDs, stage, counts, flags เท่านั้น (ไม่มี transcript/ข้อความจากรูป/raw provider data) | ตาม retention ของ log/DLQ ของ Upstash **[UNVERIFIED: ระยะเวลา]** (เปิดเผยใน privacy notice) |
 | Traces (Langfuse) | ผสม | Legitimate interest (QA) | `SensitiveDataFilter`, `recordInputs:false` สำหรับ voice/PII | 30 วัน |
 | `raw/` (Blob) | ผสม | ให้บริการ | ไม่มีข้อมูลระบุตัวบุคคลที่สาม | 30 วัน |
 
 ### 13.2 Cross-border transfer
 
-- **ผู้ประมวลผลต่างประเทศ:** OpenAI (สหรัฐฯ; residency ฝั่งเอเชียครอบคลุมแค่ storage และไม่มีไทย) · Supabase + Vercel (สิงคโปร์) · Upstash (ตั้งเป็นสิงคโปร์ — **[UNVERIFIED: region บน Marketplace]**) · Langfuse Cloud (เลือก region **JP**) · Apify/ScrapeCreators/Firecrawl (ข้อมูลสาธารณะเท่านั้น) → การส่งข้อมูลข้ามแดนตาม PDPA ม.28/29 (หลักเกณฑ์มีผล 24 มี.ค. 2024)
-- **ฐาน:** ม.29 appropriate safeguards (DPA/SCC ของผู้ให้บริการ — **ความเพียงพอตาม PDPA ต้องยืนยันกับที่ปรึกษากฎหมาย [UNVERIFIED]**) + **แจ้งใน privacy notice ก่อนอัปโหลด/ส่งข้อมูลครั้งแรก ทั้ง web (P2) และ LIFF (onboarding)** โดยระบุรายชื่อผู้ประมวลผลข้างต้นและ retention ของ Workflow · บันทึก `analysis.runs.notice_version` · consent ใช้เฉพาะเรื่องไม่บังคับ (push, marketing) เพื่อให้ consent "ให้โดยอิสระ"
+- **ผู้ประมวลผลต่างประเทศ:** OpenAI (สหรัฐฯ; residency ฝั่งเอเชียครอบคลุมแค่ storage และไม่มีไทย) · Supabase + Vercel (สิงคโปร์) · Upstash (ตั้งเป็นสิงคโปร์ — **[UNVERIFIED: region บน Marketplace]**) · Upstash QStash/Workflow (EU หรือ US — ยังไม่มี region เอเชีย; รับเฉพาะ run id และผลของ step ที่เป็น IDs/สถิติ) · Langfuse Cloud (เลือก region **JP**) · Apify/ScrapeCreators/Firecrawl (ข้อมูลสาธารณะเท่านั้น) → การส่งข้อมูลข้ามแดนตาม PDPA ม.28/29 (หลักเกณฑ์มีผล 24 มี.ค. 2024)
+- **ฐาน:** ม.29 appropriate safeguards (DPA/SCC ของผู้ให้บริการ — **ความเพียงพอตาม PDPA ต้องยืนยันกับที่ปรึกษากฎหมาย [UNVERIFIED]**) + **แจ้งใน privacy notice ก่อนอัปโหลด/ส่งข้อมูลครั้งแรก ทั้ง web (P2) และ LIFF (onboarding)** โดยระบุรายชื่อผู้ประมวลผลข้างต้นและ retention ของ log ใน Upstash Workflow · บันทึก `analysis.runs.notice_version` · consent ใช้เฉพาะเรื่องไม่บังคับ (push, marketing) เพื่อให้ consent "ให้โดยอิสระ"
 - ส่งให้ OpenAI เฉพาะข้อมูลสาธารณะของ creator + brief ของแบรนด์ · `store:false` · พิจารณาขอ ZDR ([OpenAI your data](https://developers.openai.com/api/docs/guides/your-data))
 - ร่าง guideline ฐานทางกฎหมายของ PDPC (2026-07-07) ให้ทำ LIA และมีมาตรการเพิ่มสำหรับ profiling/AI ([Tilleke](https://www.tilleke.com/insights/thailand-releases-new-draft-pdpa-guidance-on-lawful-bases-and-marketing/))
 
@@ -2751,7 +2774,7 @@ sequenceDiagram
 | LLM4 curator top-5 + portfolio + critic (conditional) | $0.30–0.45 | $0.30–0.45 |
 | Profile cards (top-5) + embeddings | ~$0.04 | ~$0.04 |
 | ASR (2 นาที) + vision (3 รูป) | ~$0.03 | ~$0.03 |
-| Vercel (Workflow events, functions), Redis, Blob | ~$0.02 | ~$0.02 |
+| Vercel functions, Upstash Workflow (~15–25 steps × $1/100K), Redis, Blob | ~$0.02 | ~$0.02 |
 | **รวม (sol ทุก stage)** | **≈ $2.4–4.8** | **≈ $1.3–2.8** |
 | **รวม (luna กับ LLM0/summarizer/LLM2b/critic)** | **≈ $2.0–4.3** | **≈ $1.0–2.4** |
 | **MVP cut (§17.5)** | **≈ $1.0–2.0** | ≈ $0.6–1.2 |
@@ -2785,7 +2808,7 @@ sequenceDiagram
 - Fluid compute auto-scale (สูงสุด 30k concurrency) · คิดเงินตาม active CPU (รอ LLM ไม่คิด CPU)
 - คอขวดจริง: **OpenAI TPM** (Build tier 1M TPM สำหรับ sol) และ **rate limit ของ provider** → semaphore ใน Redis ต่อ provider + `p-limit` + backoff
 - DB: transaction pooler + `max:1` · HNSW · partition `kol.creator_snapshots` รายเดือนเมื่อโต
-- Workflow: ≤ 2,000 events/run (batch 8 KOL/step) · payload = IDs
+- Upstash Workflow: ผลของทุก step ส่งกลับมาทุก call (message ≤ 1 MB บน Free, 10 MB บน Pay as You Go) → payload = IDs · flow control `parallelism` (Free สูงสุด 10, Pay as You Go 100) คุมจำนวน step พร้อมกันทุก run · batch 5–8 KOL/step
 
 ---
 
@@ -2799,8 +2822,8 @@ cvc-kol-matcher/
 │  ├─ web/            # cvc-web :3000 — Next.js 16.4 App Router: Web (/) + LIFF (/liff) + share + proxy.ts (edge gate)
 │  │                  #   components/ (results, chat, ui primitives ตาม docs/UI_CONTRACT.md) · lib/ (api client, session, IndexedDB)
 │  ├─ api/            # cvc-api :3001 — Next.js 16 + Hono 4 ที่ app/api/[[...route]]/route.ts — System Backend
-│  └─ agent/          # cvc-agent :3002 — Next.js 16 (withWorkflow) + Hono 4 ที่ app/api/agent/[[...route]]/route.ts
-│                     #   + Workflow SDK + Mastra — AI Backend (src/pipeline: workflow + steps, src/routes)
+│  └─ agent/          # cvc-agent :3002 — Next.js 16 + Hono 4 ที่ app/api/agent/[[...route]]/route.ts
+│                     #   + Upstash Workflow ที่ app/api/workflow/kol-match + Mastra — AI Backend (src/pipeline: plan + queue + workflow + steps, src/routes)
 ├─ packages/          # TS source (ไม่มี build step) → Next transpilePackages (apps/*/.transpile.json)
 │  ├─ schemas/        # zod: RunInput … BrandProfile, KolEvaluation, RankedCreator, CuratorOutput, ExpectedKpis, Playbook,
 │  │                  #   PortfolioPlan, NextAction, FinalResult, ProgressEvent, API DTOs, ref rows + REF_SEED / PERSONAS_SEED
@@ -2829,7 +2852,7 @@ cvc-kol-matcher/
 |---|---|
 | Runtime | **Node ≥ 22.13** (Mastra v1) / 24 · ESM only (AI SDK 7) · **npm workspaces** (npm 11.12.1) · `turbo` 2.11.10 · `typescript` 5.9.3 |
 | Frontend | `next` 16.4.2, `react` 19.3.1, Tailwind v4 (`tailwindcss` 4.3.3), `@ai-sdk/react` 4.0.152, `@line/liff` 2.31.2, `@supabase/supabase-js` 2.118.0, `botid` 1.5.11, `@vercel/blob` 2.8.2, `@vercel/related-projects` 1.1.1, `@vercel/functions` 3.10.2, `idb-keyval` 6.3.0, `lucide-react` 1.61.0 |
-| Backends | `next` 16.4.2 (api + agent) + `hono` 4.13.13 (`hono/vercel` `handle()`), `workflow` 5.2.3 (`workflow/next` `withWorkflow`), `@vercel/oidc` 4.0.2, `@vercel/functions` 3.10.2, `@vercel/blob` 2.8.2 · phase 2: `@ai-sdk/workflow` 2.0.80 |
+| Backends | `next` 16.4.2 (api + agent) + `hono` 4.13.13 (`hono/vercel` `handle()`), `@upstash/workflow` 1.4.0 (`serve` จาก `@upstash/workflow/nextjs`, `Client`) + `@upstash/qstash` 2.12.1, `@vercel/oidc` 4.0.2, `@vercel/functions` 3.10.2, `@vercel/blob` 2.8.2 |
 | AI | `@mastra/core` 1.78.0, `@mastra/memory` 1.38.0, `@mastra/pg` 1.31.2, `@mastra/ai-sdk` 1.11.1 · `ai` 7.0.148, `@ai-sdk/openai` 4.0.99, `@ai-sdk/gateway` 4.0.121 · `openai` 7.39.0 · `zod` 4.6.7 · phase 2: `@mastra/rag` 2.6.7, `@mastra/evals` 1.10.7, `@mastra/observability` 1.20.1, `@mastra/langfuse` 1.6.1, `@ai-sdk/otel` 1.0.148 |
 | Data providers | `apify-client` 2.25.0, `@mendable/firecrawl-js` 4.50.0, ScrapeCreators (REST) · phase 2: `googleapis` 187 |
 | Data | `postgres` 3.4.9 (postgres.js; MVP ไม่ใช้ ORM — repository เขียน SQL ตรงตาม migrations), `@upstash/redis` 1.39.0, `@upstash/ratelimit` 2.2.0, `jose` 6.2.13 |
@@ -2854,12 +2877,12 @@ cvc-kol-matcher/
 | SP3 | ไมโครโฟนใน LIFF browser | อัดเสียงได้ทั้ง iOS/Android | file capture / external browser |
 | SP4 | `gpt-transcribe` ภาษาไทย (+อังกฤษปน) | WER ยอมรับได้ 20 ไฟล์ | `keywords`/`prompt` เพิ่ม |
 | SP5 | `web_search` ผ่าน AI Gateway + bake-off Thai search (OpenAI vs Perplexity vs Parallel, 50 queries) | เลือก primary ด้วยข้อมูล | OpenAI ตรง (BYOK) |
-| SP6 | Workflow SDK ใน `agent` (`sin1`) + Mastra cold start + hook resume จาก Apify · **ผล:** SDK ต้องใช้ Next (`withWorkflow`) ไม่มี Hono adapter → agent เป็น Next.js 16 + Hono ใน route handler (§3.5) | run จบพร้อม resume | Mastra workflow + `@mastra/inngest` · dev/test: `runPipelineInline` |
+| SP6 | durable runner ใน `agent` (`sin1`) + Mastra cold start + resume จาก Apify · **ผล v1.3:** Vercel Workflow SDK ต้องใช้ Next (`withWorkflow`) → agent เป็น Next.js 16 + Hono ใน route handler (§3.5) · **v1.4:** เปลี่ยนเป็น Upstash Workflow บน QStash (ADR-003) → ต้องวัด overhead ต่อ step (cold start + hop QStash EU/US ↔ `sin1`) และ resume ด้วย `client.notify` | run จบครบทุก step ผ่านคิวทั้ง preview และ production · cancel/resume ได้ | Mastra workflow + `@mastra/inngest` · local: `runPipelineInline` หรือ `npm run qstash:dev` |
 | SP7 | BotID ใน LIFF WebView + ผ่าน rewrite web→agent | ไม่มี false positive | ใช้ BotID เฉพาะ guest + rate limit ต่อ `sub` |
 
 ### 17.5 MVP cut (สร้างได้ใน 5 วัน)
 
-**สถานะ (v1.3, 2026-10-21): IN ทุกข้อด้านล่างสร้างแล้วใน repo นี้** (3 apps + 9 packages, migrations 12 ไฟล์ผ่าน `npm run db:test`) และเพิ่มจากแผนเดิม: **consultant layer** (§6.10: expected KPIs ต่อโพสต์, playbook, portfolio plan เทียบงบ, next actions — ใน `FinalResult` และหน้า result/creator sheet), **รูปครีเอเตอร์** ที่ cache ลง Blob public (§8.7) และ **demo mode** (§17.6) · รายละเอียดที่ต่างจากแผน: enrich top-25 เป็น batch ละ 5 คน · progress ใช้ polling `GET /api/agent/runs/:id/events?after=` ทุก 2 s (`/stream` SSE มีให้แต่ยังเป็น stretch) · cron `retention` ยังเป็น no-op (`mode: 'mvp_noop'`) และ `GET /api/me/export` ตอบ 501 (phase 2) — ต้องทำก่อนเปิด production
+**สถานะ (v1.3, 2026-10-21): IN ทุกข้อด้านล่างสร้างแล้วใน repo นี้** (3 apps + 9 packages, migrations 12 ไฟล์ผ่าน `npm run db:test`) และเพิ่มจากแผนเดิม: **consultant layer** (§6.10: expected KPIs ต่อโพสต์, playbook, portfolio plan เทียบงบ, next actions — ใน `FinalResult` และหน้า result/creator sheet), **รูปครีเอเตอร์** ที่ cache ลง Blob public (§8.7) และ **demo mode** (§17.6) · v1.4: pipeline เข้าคิว Upstash Workflow บน QStash (ADR-003; `POST /runs` ตอบ 202 ทันที) · รายละเอียดที่ต่างจากแผน: enrich top-25 เป็น batch ละ 5 คน · progress ใช้ polling `GET /api/agent/runs/:id/events?after=` ทุก 2 s (`/stream` SSE มีให้แต่ยังเป็น stretch) · cron `retention` ยังเป็น no-op (`mode: 'mvp_noop'`) และ `GET /api/me/export` ตอบ 501 (phase 2) — ต้องทำก่อนเปิด production
 
 **IN (ยังคงทุก fixed choice: TS, Vercel 3 projects, Supabase, Redis, Blob, OpenAI ASR/embeddings, gpt-6.1-sol, LIFF + web, Mastra):**
 1. Auth: LIFF → `custom:line` (Fallback B พร้อม) · web guest + claim secret
@@ -2887,10 +2910,11 @@ cvc-kol-matcher/
 | AI (`OPENAI_API_KEY` / AI Gateway) | LLM0–LLM4, injection screen และ embeddings ใช้ **deterministic stubs** · chat ตอบจากตัวเลขใน result และบอกว่าเป็นคำตอบสาธิต · ถอดเสียงคืนข้อความว่าง (ผู้ใช้พิมพ์ข้อความแทน) |
 | Postgres (`API_DATABASE_URL` / `AGENT_DATABASE_URL`) | `@cvc/db` ใช้ store **in-memory** (cache บน `globalThis` ให้รอด HMR) + `REF_SEED`/`PERSONAS_SEED` · ข้อมูลหายเมื่อ restart |
 | Redis (`UPSTASH_*` / `KV_REST_API_*`) | `@cvc/cache` in-memory (process เดียว) สำหรับ rate limit, dedupe, budget, lock |
+| คิวงาน (`QSTASH_TOKEN`) | ไม่มี token และไม่ใช่ production → **inline runner** (`runPipelineInline` หลังตอบ response ด้วย `after()`) · production → `POST /api/agent/runs` ตอบ `503 queue_not_configured` (ไม่มี fallback) · ทดสอบคิวจริงบนเครื่องด้วย `npm run qstash:dev` (§18) |
 | Supabase Auth | ผู้ใช้ local ระบุด้วย header `x-cvc-guest-id` (uuid) · `POST /api/auth/guest` และ LINE login ตอบ 501 พร้อมข้อความไทย |
 | Blob | ไม่ cache รูป (`avatarUrl = null` → อักษรย่อ) · อัปโหลดไฟล์ตอบ 501 |
 
-- **`isDemo`:** run ถูกตั้งเป็น demo เมื่อ AI หรือ KOL provider เป็น stub/mock (หรือ `DEMO_MODE=on`) → `FinalResult.isDemo = true` + caveat ใน `methodology.caveatsTh` → UI แสดงแถบ "ข้อมูลตัวอย่าง: ยังไม่ได้ตั้งค่า API keys ผลลัพธ์นี้สร้างจากข้อมูลสมมติ" บนหน้า run และ result (docs/UI_CONTRACT.md §9) · `GET /api/health`, `/api/agent/health` คืน `demo` + รายการ integration ที่ตั้งค่าแล้ว (ไม่คืนค่า secret)
+- **`isDemo`:** run ถูกตั้งเป็น demo เมื่อ AI หรือ KOL provider เป็น stub/mock (หรือ `DEMO_MODE=on`) → `FinalResult.isDemo = true` + caveat ใน `methodology.caveatsTh` → UI แสดงแถบ "ข้อมูลตัวอย่าง: ยังไม่ได้ตั้งค่า API keys ผลลัพธ์นี้สร้างจากข้อมูลสมมติ" บนหน้า run และ result (docs/UI_CONTRACT.md §9) · `GET /api/health`, `/api/agent/health` คืน `demo` + รายการ integration ที่ตั้งค่าแล้ว (ไม่คืนค่า secret; agent เพิ่ม `configured.queue` และ `runner`)
 - **`DEMO_MODE`:** `auto` (default) = ใช้ mock/stub เฉพาะส่วนที่ไม่มี key · `on` = บังคับ AI stubs และทำทุก run เป็น demo แม้มี key · `off` = ไม่มี fallback: ขาด key แล้ว error ทันที (ใช้ใน production เพื่อไม่ให้ข้อมูลสมมติหลุดไปถึงลูกค้า)
 - demo run หน่วงแต่ละ step เล็กน้อย (`DEMO_STEP_DELAY_MS`, default 700 ms) ให้เห็น timeline ของ progress · ตัวเลขทั้งหมดยังผ่าน `packages/scoring` จริง จึงใช้ทดสอบ consultant layer ได้
 
@@ -2898,7 +2922,7 @@ cvc-kol-matcher/
 
 ## 18. Setup & Local Development
 
-**1. Prerequisites:** Node ≥ 22.13 (แนะนำ 24 ให้ตรงกับ Vercel), npm 11 (`packageManager` npm@11.12.1) · ไม่บังคับ: Supabase CLI (`npx supabase`), Vercel CLI, LINE Login channel + LIFF app (staging), LINE OA, keys: OpenAI, ScrapeCreators, Apify, Firecrawl (YouTube/Supadata สำหรับ phase 2), HTTPS tunnel (เช่น cloudflared/ngrok) สำหรับ LIFF · **ไม่มี key เลยก็รันได้ในโหมด demo (§17.6)**
+**1. Prerequisites:** Node ≥ 22.13 (แนะนำ 24 ให้ตรงกับ Vercel), npm 11 (`packageManager` npm@11.12.1) · ไม่บังคับ: Supabase CLI (`npx supabase`), Vercel CLI, LINE Login channel + LIFF app (staging), LINE OA, keys: OpenAI, ScrapeCreators, Apify, Firecrawl (YouTube/Supadata สำหรับ phase 2), HTTPS tunnel (เช่น cloudflared/ngrok) สำหรับ LIFF, Upstash QStash (production ต้องมี; local ใช้ QStash dev server ผ่าน `npm run qstash:dev` ได้) · **ไม่มี key เลยก็รันได้ในโหมด demo (§17.6)**
 
 **2. Install & environment** — `.env` **ไฟล์เดียวที่ root** ใช้ร่วมทั้ง 3 app: `next.config.ts` ของทุก app เรียก `loadEnvConfig(repoRoot, dev, …, true)` (`forceReload` เพราะ Next cache ผลของ `apps/*` ไว้ก่อน) แล้วคืนค่าที่ตั้งใน process ก่อนหน้า (ค่าจาก shell/CI ชนะไฟล์) · บน Vercel ไม่มีไฟล์นี้ ใช้ env ของแต่ละ project
 
@@ -2925,13 +2949,19 @@ npm run db:test
 | ทุก app | `EDGE_SHARED_SECRET` (ค่าเดียวกันทั้ง 3), `NEXT_PUBLIC_APP_URL`, `DEMO_MODE` (`auto` / `on` / `off`; api + agent) |
 | `apps/web` | `API_ORIGIN=http://localhost:3001`, `AGENT_ORIGIN=http://localhost:3002`, `PREVIEW_BYPASS_SECRET`, `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY`, `NEXT_PUBLIC_LIFF_ID`, `NEXT_PUBLIC_LINE_OA_BASIC_ID` (option), `NEXT_PUBLIC_NOTICE_VERSION` · (option) `VERCEL_PROJECT_API` / `VERCEL_PROJECT_AGENT` สำหรับ related projects |
 | `apps/api` | `AGENT_ORIGIN` (internal OIDC calls), `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY`, `NEXT_PUBLIC_NOTICE_VERSION`, `SUPABASE_URL`, `SUPABASE_SECRET_KEY`, `API_DATABASE_URL` (svc_api), `LINE_LOGIN_CHANNEL_ID`, `LINE_LOGIN_CHANNEL_SECRET`, `LINE_MESSAGING_CHANNEL_SECRET`, `LINE_MESSAGING_CHANNEL_ACCESS_TOKEN`, `UPSTASH_REDIS_REST_URL` / `UPSTASH_REDIS_REST_TOKEN` (หรือ `KV_REST_API_URL` / `KV_REST_API_TOKEN`), `BLOB_PRIVATE_READ_WRITE_TOKEN`, `VERCEL_TEAM_SLUG`, `VERCEL_PROJECT_API` / `VERCEL_PROJECT_AGENT`, `CRON_SECRET` |
-| `apps/agent` | `API_ORIGIN` (internal OIDC calls), `SUPABASE_URL` (JWKS), `AGENT_DATABASE_URL` (svc_agent), Upstash (ชุดเดียวกับ api), `BLOB_PRIVATE_READ_WRITE_TOKEN` (private), `CREATOR_MEDIA_BLOB_READ_WRITE_TOKEN` (public), `VERCEL_TEAM_SLUG`, `VERCEL_PROJECT_API` / `VERCEL_PROJECT_AGENT`, `CRON_SECRET`, `OPENAI_API_KEY`, `USE_AI_GATEWAY` / `AI_GATEWAY_API_KEY` (local; บน Vercel ใช้ OIDC), `OPENAI_MODEL_MAIN` / `OPENAI_MODEL_FAST` / `OPENAI_TRANSCRIBE_MODEL` / `OPENAI_EMBEDDING_MODEL` / `OPENAI_EMBEDDING_DIMENSIONS`, `SCRAPECREATORS_API_KEY`, `APIFY_TOKEN` / `APIFY_WEBHOOK_SECRET`, `FIRECRAWL_API_KEY`, `BUDGET_SOFT_USD` / `BUDGET_HARD_USD`, `LANGFUSE_*` (option) · phase 2: `YOUTUBE_API_KEY`, `SUPADATA_API_KEY` |
+| `apps/agent` | `API_ORIGIN` (internal OIDC calls), `SUPABASE_URL` (JWKS), `AGENT_DATABASE_URL` (svc_agent), Upstash (ชุดเดียวกับ api), `BLOB_PRIVATE_READ_WRITE_TOKEN` (private), `CREATOR_MEDIA_BLOB_READ_WRITE_TOKEN` (public), `VERCEL_TEAM_SLUG`, `VERCEL_PROJECT_API` / `VERCEL_PROJECT_AGENT`, `CRON_SECRET`, `OPENAI_API_KEY`, `USE_AI_GATEWAY` / `AI_GATEWAY_API_KEY` (local; บน Vercel ใช้ OIDC), `OPENAI_MODEL_MAIN` / `OPENAI_MODEL_FAST` / `OPENAI_TRANSCRIBE_MODEL` / `OPENAI_EMBEDDING_MODEL` / `OPENAI_EMBEDDING_DIMENSIONS`, `SCRAPECREATORS_API_KEY`, `APIFY_TOKEN` / `APIFY_WEBHOOK_SECRET`, `FIRECRAWL_API_KEY`, `BUDGET_SOFT_USD` / `BUDGET_HARD_USD`, `LANGFUSE_*` (option) · คิว: `QSTASH_TOKEN`, `QSTASH_CURRENT_SIGNING_KEY`, `QSTASH_NEXT_SIGNING_KEY`, `QSTASH_URL` (ว่าง = EU; local `http://127.0.0.1:8080`), `UPSTASH_WORKFLOW_URL` (local `http://localhost:3002`), `PIPELINE_RUNNER` (`auto`), `PIPELINE_MAX_PARALLEL_RUNS` (`3`) · phase 2: `YOUTUBE_API_KEY`, `SUPADATA_API_KEY` |
 | local เท่านั้น | `VERCEL_OIDC_TOKEN` (จาก `vercel env pull`; บน Vercel ถูก inject ต่อ request) |
 
 **5. Run** (turbo รัน 3 app ขนาน: web :3000, api :3001, agent :3002; `proxy.ts` ส่ง `/api/agent/*` → `AGENT_ORIGIN` และ `/api/*` → `API_ORIGIN`)
 
 ```bash
 npm run dev
+```
+
+pipeline ไม่รันใน request: `POST /api/agent/runs` ตอบ `202` แล้ว runner ทำงานต่อ (ADR-003) · ไม่มี `QSTASH_TOKEN` = inline runner ใน process ของ agent (local/demo เท่านั้น) · ทดสอบผ่านคิวจริงบนเครื่อง: เปิด QStash dev server อีก terminal แล้วคัดลอก `QSTASH_TOKEN` / `QSTASH_CURRENT_SIGNING_KEY` / `QSTASH_NEXT_SIGNING_KEY` ที่พิมพ์ออกมาลง `.env` พร้อม `QSTASH_URL=http://127.0.0.1:8080` และ `UPSTASH_WORKFLOW_URL=http://localhost:3002` แล้ว restart `npm run dev` (`GET /api/agent/health` → `runner: "upstash"`)
+
+```bash
+npm run qstash:dev
 ```
 
 **6. LIFF:** เปิด tunnel ไปที่ `localhost:3000` แล้วตั้ง Endpoint URL ของ LIFF app (staging) เป็น `https://<tunnel>/liff` · (phase 2) ทดสอบ UI ด้วย `@line/liff-mock` โดยไม่ต้องเปิด LINE
@@ -2952,7 +2982,7 @@ npm run db:test
 
 (`test` = vitest ของ scoring, providers, ai, thai · golden set/Promptfoo evals = phase 2)
 
-**8. Deploy:** 3 Vercel projects จาก repo เดียว (Root Directory `apps/web`, `apps/api`, `apps/agent`; preset Next.js; Node 24.x; region `sin1` และ cron มาจาก `apps/*/vercel.json`) → เชื่อม Upstash (Marketplace) กับ api + agent → Blob store `cvc-private` (prefix `BLOB_PRIVATE`, api + agent) และ `cvc-creator-media` แบบ public (prefix `CREATOR_MEDIA_BLOB`, agent) → OIDC federation (Issuer mode Team) → `EDGE_SHARED_SECRET` / `PREVIEW_BYPASS_SECRET` / `CRON_SECRET` → related projects ใน `apps/web/vercel.json` → domain ที่ `cvc-web` เท่านั้น → อัปเดต LIFF Endpoint URL · ขั้นตอนเต็ม + ตาราง env ต่อ project + checklist: [docs/DEPLOYMENT.md](./docs/DEPLOYMENT.md)
+**8. Deploy:** 3 Vercel projects จาก repo เดียว (Root Directory `apps/web`, `apps/api`, `apps/agent`; preset Next.js; Node 24.x; region `sin1` และ cron มาจาก `apps/*/vercel.json`) → เชื่อม Upstash Redis (Marketplace) กับ api + agent → Upstash QStash/Workflow (Console หรือ Marketplace) กับ agent เท่านั้น: `QSTASH_TOKEN` + signing keys, `UPSTASH_WORKFLOW_URL` เฉพาะ Production (ว่างได้), preview ใช้ `VERCEL_AUTOMATION_BYPASS_SECRET` → Blob store `cvc-private` (prefix `BLOB_PRIVATE`, api + agent) และ `cvc-creator-media` แบบ public (prefix `CREATOR_MEDIA_BLOB`, agent) → OIDC federation (Issuer mode Team) → `EDGE_SHARED_SECRET` / `PREVIEW_BYPASS_SECRET` / `CRON_SECRET` → related projects ใน `apps/web/vercel.json` → domain ที่ `cvc-web` เท่านั้น → อัปเดต LIFF Endpoint URL · ขั้นตอนเต็ม + ตาราง env ต่อ project + checklist: [docs/DEPLOYMENT.md](./docs/DEPLOYMENT.md)
 
 **9. Demo brief:** เปิด `/new` → กรอกชื่อแบรนด์ + เว็บไซต์ + Facebook → เลือก persona → (option) แนบ screenshot/เสียง → เริ่มวิเคราะห์ → ดูผล (expected KPIs, แผนงาน, ขั้นตอนถัดไป) → ถาม chat "เทียบอันดับ 1 กับ 3" · ไม่มี key = ผลเป็นข้อมูลตัวอย่างพร้อมแถบแจ้ง (§17.6)
 
@@ -3041,10 +3071,14 @@ npm run db:test
 - AI SDK 7 — https://vercel.com/blog/ai-sdk-7 · https://ai-sdk.dev/docs/migration-guides/migration-guide-7-0 · Telemetry — https://ai-sdk.dev/docs/ai-sdk-core/telemetry
 
 **Vercel**
-- Functions limits — https://vercel.com/docs/functions/limitations · Workflows — https://vercel.com/docs/workflows · https://vercel.com/docs/workflows/pricing · https://vercel.com/docs/workflows/retention · Streaming — https://workflow-sdk.dev/docs/foundations/streaming · Errors & retries — https://workflow-sdk.dev/docs/foundations/errors-and-retries
+- Functions limits — https://vercel.com/docs/functions/limitations · System environment variables — https://vercel.com/docs/environment-variables/system-environment-variables · Deployment Protection — https://vercel.com/docs/deployment-protection · (v1.3, เลิกใช้) Workflows — https://vercel.com/docs/workflows
 - Services — https://vercel.com/docs/services · Monorepos / related projects — https://vercel.com/docs/monorepos · OIDC — https://vercel.com/docs/oidc · Protection bypass — https://vercel.com/docs/deployment-protection/methods-to-bypass-deployment-protection/protection-bypass-automation
 - AI Gateway — https://vercel.com/docs/ai-gateway/pricing · Web search tools — https://vercel.com/docs/ai-gateway/capabilities/web-search · gpt-6.1-sol on Gateway — https://vercel.com/changelog/gpt-6-1-sol-now-available-on-ai-gateway
 - Blob — https://vercel.com/docs/vercel-blob · Client upload — https://vercel.com/docs/vercel-blob/client-upload · Redis — https://vercel.com/docs/redis · BotID — https://vercel.com/docs/botid · Cron — https://vercel.com/docs/cron-jobs/usage-and-pricing · Regions — https://vercel.com/docs/regions
+
+**Upstash (คิวงาน)**
+- Upstash Workflow — https://upstash.com/docs/workflow/getstarted · Client/trigger — https://upstash.com/docs/workflow/basics/client/trigger · Flow control — https://upstash.com/docs/workflow/features/flow-control · Prevent retries (`WorkflowNonRetryableError`) — https://upstash.com/docs/workflow/features/retries/prevent-retries · Failures, `failureFunction`, DLQ — https://upstash.com/docs/workflow/howto/failures
+- Local dev server — https://upstash.com/docs/workflow/howto/local-development/development-server · Vercel Deployment Protection — https://upstash.com/docs/workflow/troubleshooting/vercel · QStash regions — https://upstash.com/docs/qstash/howto/multi-region · Pricing — https://upstash.com/pricing/workflow · Vercel Marketplace — https://vercel.com/marketplace/upstash
 
 **Supabase & LINE**
 - Custom OAuth/OIDC providers — https://supabase.com/docs/guides/auth/custom-oauth-providers · Anonymous sign-ins — https://supabase.com/docs/guides/auth/auth-anonymous · Signing keys — https://supabase.com/docs/guides/auth/signing-keys · RLS — https://supabase.com/docs/guides/database/postgres/row-level-security

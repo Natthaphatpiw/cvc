@@ -23,7 +23,6 @@ const CURATE_CONCURRENCY = 5;
 
 /** LLM4 for the top N (narrative only) + code KPIs, playbook hints, portfolio plan and next actions. */
 export async function curateStep(runId: string): Promise<{ curated: number; failures: number }> {
-  'use step';
   const done = await getCheckpoint<CurateCheckpoint>(runId, StepKey.curate);
   if (done) return { curated: done.items.length, failures: done.failures };
 

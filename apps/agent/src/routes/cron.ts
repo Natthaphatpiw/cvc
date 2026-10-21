@@ -2,17 +2,22 @@ import { requireCron } from '@cvc/auth';
 import { dedupe } from '@cvc/cache';
 import { getAgentStore, type AgentStore, type RunRecord } from '@cvc/db';
 import { Hono } from 'hono';
-import { getRun } from 'workflow/api';
 import type { AppEnv } from '../http';
 import { errorMessage } from '../lib/async';
+import { cancelWorkflowRun, queueRunState } from '../pipeline/queue';
 
 const STUCK_AFTER_MINUTES = 15;
+/**
+ * Queued runs share one flow-control key, so a run can wait in QStash for a while without writing progress. Those are
+ * only failed when QStash says the run ended without our pipeline finishing it, or after this hard upper bound.
+ */
+const QUEUE_STUCK_AFTER_MINUTES = 120;
 const STUCK_MESSAGE_TH = 'การวิเคราะห์ใช้เวลานานผิดปกติและถูกหยุดไว้ กรุณาลองใหม่อีกครั้ง';
 
 async function failStuckRun(store: AgentStore, run: RunRecord): Promise<void> {
   if (run.workflowRunId) {
     try {
-      await getRun(run.workflowRunId).cancel({ cancelReason: `no progress for ${STUCK_AFTER_MINUTES} minutes` });
+      await cancelWorkflowRun(run.workflowRunId);
     } catch (err) {
       console.warn('[agent] cancel stuck workflow failed', run.workflowRunId, errorMessage(err));
     }
@@ -33,17 +38,28 @@ export function cronRoutes(): Hono<AppEnv> {
   r.get('/cron/requeue-stuck', requireCron(), async (c) => {
     const store = getAgentStore();
     // already excludes terminal runs and awaiting_review (waits on a person, not on the pipeline)
-    const stuck = await store.listStaleRuns(STUCK_AFTER_MINUTES);
+    const stale = await store.listStaleRuns(STUCK_AFTER_MINUTES);
+    const now = Date.now();
     let failed = 0;
-    for (const run of stuck) {
+    let waiting = 0;
+    for (const run of stale) {
       try {
+        if (run.workflowRunId) {
+          const idleMinutes = (now - Date.parse(run.updatedAt)) / 60_000;
+          const state = await queueRunState(run.workflowRunId);
+          // still queued or between steps in QStash: leave it unless it has been idle past the hard bound
+          if (state !== 'ended' && idleMinutes < QUEUE_STUCK_AFTER_MINUTES) {
+            waiting += 1;
+            continue;
+          }
+        }
         await failStuckRun(store, run);
         failed += 1;
       } catch (err) {
         console.error('[agent] requeue-stuck could not fail run', run.id, errorMessage(err));
       }
     }
-    return c.json({ ok: true, checked: stuck.length, failed });
+    return c.json({ ok: true, checked: stale.length, failed, waiting });
   });
 
   // MVP keeps every run and result. Phase 2 implements §8.5 here: delete chat threads and expired guest runs/results,

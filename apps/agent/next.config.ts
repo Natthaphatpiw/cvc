@@ -2,7 +2,6 @@ import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { loadEnvConfig } from '@next/env';
 import type { NextConfig } from 'next';
-import { withWorkflow } from 'workflow/next';
 
 // All three apps read the single repo-root .env. Next calls loadEnvConfig(apps/agent) before importing this file and
 // @next/env caches that result, so the root must be loaded with forceReload. A forced reload first resets
@@ -30,4 +29,4 @@ const nextConfig: NextConfig = {
   reactStrictMode: true,
 };
 
-export default withWorkflow(nextConfig);
+export default nextConfig;

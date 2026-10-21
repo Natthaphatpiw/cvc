@@ -293,17 +293,19 @@ Prompt files live in `src/prompts/*.ts` as pure functions with `PROMPT_VERSION`.
 
 Next.js 16 app whose only UI is a 200 status page. Hono app mounted at `app/api/agent/[[...route]]/route.ts`
 (`new Hono().basePath('/api/agent')`, `handle()` from `hono/vercel`, export GET/POST/DELETE, `runtime = 'nodejs'`,
-`maxDuration = 800`). `next.config.ts` = `withWorkflow({ transpilePackages, … })` and loads the root `.env`.
+`maxDuration = 800`). `next.config.ts` is a plain Next config (`transpilePackages`, …) that loads the root `.env`. There is
+no Vercel Workflow (no `withWorkflow`, no `workflow` package): runs are queued with Upstash Workflow on QStash
+(`@upstash/workflow` 1.4.0, `@upstash/qstash` 2.12.1), so no request waits for the pipeline.
 
 | Route | Auth | Notes |
 |---|---|---|
-| `GET /health` | – | `HealthResponse` |
+| `GET /health` | – | `HealthResponse` + agent-only `runner: 'upstash' \| 'inline' \| 'unavailable'`; `configured.queue` = `QSTASH_TOKEN` and both signing keys set (booleans/mode only, never values) |
 | `POST /transcribe` | edge + user | `TranscribeRequest` → `TranscribeResponse`; asset must be under `uploads/{userId}/`; rate limit |
-| `POST /runs` | edge + user | `RunInput` → `202 CreateRunResponse`; dedupe; guests get `claimSecret` |
+| `POST /runs` | edge + user | `RunInput` → `202 CreateRunResponse` once the run is enqueued (never waits for the pipeline); dedupe; guests get `claimSecret`; runner `unavailable` → `503 { error: { code: 'queue_not_configured', messageTh } }`; `client.trigger` throws → `503 pipeline_unavailable`; both mark the run `failed` and release the dedupe key |
 | `GET /runs/:id` | edge + owner | `RunStatusResponse` |
 | `GET /runs/:id/events?after=` | edge + owner | `RunEventsResponse` (polling) |
-| `GET /runs/:id/stream?startIndex=` | edge + owner | SSE of `ProgressEvent` (stretch; closes at ~290 s) |
-| `POST /runs/:id/cancel` | edge + owner | cancel workflow run, status `cancelled` |
+| `GET /runs/:id/stream?startIndex=` | edge + owner | SSE of `ProgressEvent` polled from the store (`listProgress`), no workflow stream (stretch; closes at ~290 s) |
+| `POST /runs/:id/cancel` | edge + owner | status `cancelled` (steps stop on their own once they see it), then `client.cancel(workflowRunId)` on the Upstash Workflow `Client` (404 / unknown run ignored) |
 | `GET /results/:id` | edge + owner | `FinalResult` |
 | `POST /results/:id/rescore` | edge + owner | `RescoreRequest` → `RescoreResponse` (no LLM) |
 | `POST /results/:id/feedback` | edge + owner | `FeedbackRequest` → 204 |
@@ -312,16 +314,55 @@ Next.js 16 app whose only UI is a 200 status page. Hono app mounted at `app/api/
 | `POST /chat/:resultId/reset` | edge + owner | new session → `ChatSessionResponse` |
 | `POST /internal/claim-runs` | OIDC(api) | `ClaimRunsInternalRequest` (hashes) → `{ claimed }` |
 | `POST /internal/purge-user` | OIDC(api) | `PurgeUserRequest` → `PurgeUserResponse` |
-| `POST /webhooks/apify` | secret | signal only (verify via Apify API) → resume hook |
-| `GET /cron/requeue-stuck`, `GET /cron/retention` | cron | §8.5 |
+| `POST /webhooks/apify` | secret | signal only (verify via Apify API); phase 2 resumes the run with `client.notify` (`context.waitForEvent`) |
+| `GET /cron/requeue-stuck`, `GET /cron/retention` | cron | §8.5; requeue-stuck cancels a stuck run with `client.cancel(workflowRunId)` |
 
-Pipeline: `workflows/kol-match.ts` (`'use workflow'`) + `pipeline/steps/*.ts` (`'use step'`), step I/O = IDs/counts
-only, data via `AgentStore`, progress via `store.appendProgress` (+ `getWritable` stream when available).
+**Workflow endpoint (outside Hono):** `POST /api/workflow/kol-match` → `app/api/workflow/kol-match/route.ts`
+(`runtime = 'nodejs'`, `maxDuration = 800` per step call, also set in `vercel.json` → `functions["app/api/workflow/kol-match/route.ts"]`), handler = `serve<KolMatchPayload, PipelineOutcome>(…)` from
+`@upstash/workflow/nextjs` in `src/pipeline/workflows/kol-match.ts`. Body = `{ runId }` only. Only QStash calls it:
+`serve` verifies `Upstash-Signature` with `QSTASH_CURRENT_SIGNING_KEY` / `QSTASH_NEXT_SIGNING_KEY` (the SDK skips
+verification when either key is missing, so in production the handler answers `503 queue_not_configured` without both).
+It lives outside `/api/agent`, so `requireEdge` does not apply and the web proxy never forwards to it (`/api/*` other than
+`/api/agent/*` goes to api).
+
+- **Trigger** (`src/pipeline/start.ts` / `queue.ts`): `new Client({ token: QSTASH_TOKEN, baseUrl?: QSTASH_URL })` from
+  `@upstash/workflow` → `client.trigger({ url, body: { runId }, workflowRunId: 'kol-match-<runId>', retries: 3,
+  flowControl: { key: 'cvc-kol-match', parallelism: PIPELINE_MAX_PARALLEL_RUNS (default 3) }, label: 'kol-match',
+  headers? })`. The SDK prefixes the id, so `RunRecord.workflowRunId` = `wfr_kol-match-<runId>` (Upstash Console
+  and DLQ show this id). `flowControl` / `retries` are trigger options and apply to the
+  whole run (`serve` has no such options in 1.4.0).
+- **Workflow URL:** `${base}/api/workflow/kol-match` with `base` = `UPSTASH_WORKFLOW_URL`, else on Vercel
+  `https://$VERCEL_PROJECT_PRODUCTION_URL` (`VERCEL_ENV=production`) or `https://$VERCEL_URL` (preview), else (local, not
+  production) `http://localhost:3002`. The same origin is handed to `serve` (as `UPSTASH_WORKFLOW_URL` in its `env`).
+- **Preview bypass:** when `VERCEL_AUTOMATION_BYPASS_SECRET` (Vercel system env) is set, `x-vercel-protection-bypass` goes
+  in the trigger `headers` **and** in `serve({ qstashClient: { headers } })`. The QStash client forwards its global
+  headers (`Upstash-Forward-*`) on every step it publishes; trigger headers alone do not reach later steps because the
+  SDK drops incoming `x-vercel-*` headers when it rebuilds `context.headers`.
+- **Runner selection** (`runnerMode()`, `PIPELINE_RUNNER` default `auto`): `auto` → `upstash` when `QSTASH_TOKEN` is set,
+  else `inline` when `NODE_ENV !== 'production'`, else `unavailable` · `upstash` → `upstash` if the token is set, else
+  `unavailable` · `inline` → `inline` outside production, `unavailable` in production. `inline` =
+  `runPipelineInline(runId)` after the response (`after()`), local/demo only. `unavailable` → `POST /runs` answers `503`
+  `queue_not_configured` (`messageTh: 'ระบบคิวงานยังไม่ได้ตั้งค่า (QStash) จึงยังเริ่มการวิเคราะห์ไม่ได้'`) and marks the run
+  `failed`. Production never runs the pipeline inline.
+- **Errors:** the route function must not catch errors around `context.run` (the SDK ends each call with `WorkflowAbort`
+  after a step). A thrown error retries that step (QStash retries with backoff); `WorkflowNonRetryableError` (from
+  `@upstash/workflow`) fails the run at once. Then `failureFunction` calls `markRunFailed(runId, failResponse)` (no-op
+  when the run is already terminal; sets `failed` + Thai message, releases the dedupe key) and the run lands in the
+  Upstash DLQ. A step that finds the run cancelled/finished returns `{ inactive: true }` and the workflow calls
+  `context.cancel()` (no failure function, no DLQ).
+
+Pipeline: `runKolMatch(runId, step)` in `src/pipeline/plan.ts` is shared by both runners — Upstash passes
+`(name, fn) => context.run(name, fn)`, inline passes an in-process retry loop. Step names are unique and must stay stable
+across deploys (Upstash matches them against the steps already recorded for a run): `normalize`, `prefetch:<source>`,
+`evidence`, `brand`, `plan-queries`, `discover`, `enrich:<n>`, `plan-evaluation`, `evaluate:<n>`, `rank`, `curate`,
+`finalize`. Under Upstash the function re-runs from the top on every step call and only step results are replayed, so
+code outside `step` is deterministic and side-effect free. Step I/O = IDs/counts only (results travel through QStash),
+data via `AgentStore`, progress only via `store.appendProgress` (no workflow stream).
 Steps (MVP §17.5): normalize → prefetch (website, facebook, tiktok in parallel, each optional) → summarize →
 brand → plan queries → discover (search + gate 0a + pre-score) → enrich (top 25: profile + videos + metrics + avatar
 cache + gate 0b) → evaluate (injection screen + LLM2b + gate 0c) → rank (`scoreCandidates`) → curate (top N: expected
 KPIs, playbook hints, LLM4, portfolio plan, next actions) → assemble `FinalResult` → persist. Budget guard before every
-paid call. When the Workflow runtime cannot start (e.g. tests), `runPipelineInline(runId)` runs the same steps in order.
+paid call. `runPipelineInline(runId)` runs the same plan in-process (local/demo/tests; never in production).
 
 ## apps/api (cvc-api, port 3001)
 

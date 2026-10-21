@@ -12,7 +12,7 @@ a portfolio plan against the budget, and next actions — plus a chatbot scoped 
 apps/
   web/      cvc-web    Next.js 16 — web app + LINE LIFF + proxy.ts edge gate         :3000
   api/      cvc-api    Next.js 16 + Hono — auth, users, saved results, LINE, uploads  :3001
-  agent/    cvc-agent  Next.js 16 + Hono + Vercel Workflow + Mastra — AI pipeline     :3002
+  agent/    cvc-agent  Next.js 16 + Hono + Upstash Workflow (QStash) + Mastra — AI    :3002
 packages/
   schemas/  zod contracts (RunInput → FinalResult, API DTOs, reference data)
   scoring/  deterministic metrics, gates, ranking, expected KPIs, plan, next actions
@@ -46,11 +46,25 @@ Open http://localhost:3000. With an empty `.env` everything runs in **demo mode*
 creators (handles start with `cvcdemo_`, no photos), AI calls are deterministic stubs, data lives in memory, and every
 screen shows that the data is sample data. Fill in the variables in `.env` to switch each integration to live.
 
+Analysis runs go through a job queue: `POST /api/agent/runs` only enqueues the run and answers `202`, then Upstash
+QStash calls the workflow endpoint `/api/workflow/kol-match` on the agent once per step (Upstash Workflow), so no request
+waits for the whole pipeline and nothing hits a function timeout. Without `QSTASH_TOKEN` the local/demo setup runs the
+same steps in-process instead; production refuses to start a run without the queue (`503 queue_not_configured`). To try
+the real queue locally, start the QStash dev server in a second terminal:
+
+```bash
+npm run qstash:dev
+```
+
+Copy the `QSTASH_TOKEN`, `QSTASH_CURRENT_SIGNING_KEY` and `QSTASH_NEXT_SIGNING_KEY` it prints into `.env`, set
+`QSTASH_URL=http://127.0.0.1:8080` and `UPSTASH_WORKFLOW_URL=http://localhost:3002`, then restart `npm run dev`.
+
 ## Scripts
 
 | Command | What it does |
 |---|---|
 | `npm run dev` | all three apps in parallel (turbo) |
+| `npm run qstash:dev` | local QStash dev server on http://127.0.0.1:8080 for the job queue; prints a local token and signing keys |
 | `npm run typecheck` | `tsc --noEmit` in every workspace |
 | `npm run test` | vitest (scoring, providers, ai, thai) |
 | `npm run build` | `next build` for the three apps |
@@ -58,5 +72,6 @@ screen shows that the data is sample data. Fill in the variables in `.env` to sw
 
 ## Deploying
 
-Three Vercel projects from this one repo (Root Directory `apps/web`, `apps/api`, `apps/agent`). Step-by-step setup,
-storage, LINE, secrets and the per-project environment table: [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md).
+Three Vercel projects from this one repo (Root Directory `apps/web`, `apps/api`, `apps/agent`), plus Upstash QStash for
+the job queue (agent only). Step-by-step setup, storage, queue, LINE, secrets and the per-project environment table:
+[docs/DEPLOYMENT.md](docs/DEPLOYMENT.md).

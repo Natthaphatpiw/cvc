@@ -1,7 +1,7 @@
 import { researchBrand } from '@cvc/ai';
 import type { BrandProfile, InputBrief, RunInput } from '@cvc/schemas';
 import { normalizeHandle } from '@cvc/thai';
-import { FatalError } from 'workflow';
+import { WorkflowNonRetryableError } from '@upstash/workflow';
 import {
   MSG,
   briefOf,
@@ -45,7 +45,6 @@ function applyUserConstraints(brand: BrandProfile, input: RunInput, c: InputBrie
 
 /** LLM1 Brand Intelligence → analysis.brand_profiles; emits the brand card for the progress UI. */
 export async function brandStep(runId: string): Promise<BrandCheckpoint> {
-  'use step';
   const done = await getCheckpoint<BrandCheckpoint>(runId, StepKey.brand);
   if (done) return done;
 
@@ -55,7 +54,7 @@ export async function brandStep(runId: string): Promise<BrandCheckpoint> {
   await demoPause(run);
 
   const state = await guardBudget(runId);
-  if (state === 'hard') throw new FatalError(MSG.budgetHardBeforeBrand);
+  if (state === 'hard') throw new WorkflowNonRetryableError(MSG.budgetHardBeforeBrand);
 
   const [evidence, personas, ref] = await Promise.all([
     store().listEvidence(runId),

@@ -60,7 +60,6 @@ function fallbackQueries(brand: BrandProfile): PlannedQuery[] {
 
 /** LLM2a: ≤ 8 search queries (Thai + English) derived from the brand profile. */
 export async function planQueriesStep(runId: string): Promise<{ queryCount: number }> {
-  'use step';
   const done = await getCheckpoint<PlanCheckpoint>(runId, StepKey.plan);
   if (done) return { queryCount: done.queries.length };
 
@@ -97,7 +96,6 @@ function refKey(r: CandidateRef): string {
 
 /** Search → gate 0a → dedupe → pre-score → keep the top 40 (relaxing gate 0a once when fewer than 10 pass). */
 export async function discoverStep(runId: string): Promise<{ batchCount: number; candidates: number }> {
-  'use step';
   const done = await getCheckpoint<DiscoverCheckpoint>(runId, StepKey.discover);
   if (done) return { batchCount: Math.ceil(Math.min(ENRICH_LIMIT, done.refs.length) / BATCH_SIZE), candidates: done.refs.length };
 

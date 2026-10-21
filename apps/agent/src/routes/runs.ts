@@ -11,7 +11,6 @@ import {
 } from '@cvc/schemas';
 import { Hono } from 'hono';
 import { streamSSE } from 'hono/streaming';
-import { getRun } from 'workflow/api';
 import { isDemoRun } from '../env';
 import {
   ApiFailure,
@@ -24,7 +23,8 @@ import {
   type AppEnv,
 } from '../http';
 import { errorMessage } from '../lib/async';
-import { startPipeline } from '../pipeline/start';
+import { QUEUE_NOT_CONFIGURED_CODE, QUEUE_NOT_CONFIGURED_TH, cancelWorkflowRun } from '../pipeline/queue';
+import { QueueNotConfiguredError, startPipeline } from '../pipeline/start';
 
 const DEDUPE_TTL_SEC = 24 * 3600;
 const STREAM_MAX_MS = 290_000;
@@ -151,13 +151,15 @@ export function runRoutes(): Hono<AppEnv> {
 
     try {
       const started = await startPipeline(run.id);
-      if (started.mode === 'workflow') await store.updateRun(run.id, { workflowRunId: started.workflowRunId });
+      if (started.mode === 'upstash') await store.updateRun(run.id, { workflowRunId: started.workflowRunId });
     } catch (err) {
+      const queueMissing = err instanceof QueueNotConfiguredError;
       console.error('[agent] could not start pipeline', run.id, errorMessage(err));
-      const messageTh = 'เริ่มการวิเคราะห์ไม่สำเร็จ กรุณาลองใหม่อีกครั้ง';
+      const code = queueMissing ? QUEUE_NOT_CONFIGURED_CODE : 'pipeline_unavailable';
+      const messageTh = queueMissing ? QUEUE_NOT_CONFIGURED_TH : 'เริ่มการวิเคราะห์ไม่สำเร็จ กรุณาลองใหม่อีกครั้ง';
       await store.updateRun(run.id, { status: 'failed', errorMessageTh: messageTh, completedAt: new Date().toISOString() });
       await dedupe.del(me.id, inputHash).catch(() => undefined);
-      throw new ApiFailure(503, 'pipeline_unavailable', messageTh);
+      throw new ApiFailure(503, code, messageTh);
     }
 
     const body: CreateRunResponse = { runId: run.id, status: run.status, claimSecret, deduped: false };
@@ -222,7 +224,7 @@ export function runRoutes(): Hono<AppEnv> {
     });
     if (run.workflowRunId) {
       try {
-        await getRun(run.workflowRunId).cancel({ cancelReason: 'cancelled by owner' });
+        await cancelWorkflowRun(run.workflowRunId);
       } catch (err) {
         // Steps also stop on their own once they see the cancelled status.
         console.warn('[agent] workflow cancel failed', run.workflowRunId, errorMessage(err));
