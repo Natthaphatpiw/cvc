@@ -113,7 +113,9 @@ pipeline ไม่รันใน request: `POST /api/agent/runs` สร้า�
 ### 2.5 ความปลอดภัยระหว่าง service
 
 1. **Team slug**: Settings ของ team → URL `vercel.com/<team-slug>` → ใช้เป็น `VERCEL_TEAM_SLUG`
-2. **OIDC** (api ↔ agent เรียก `/internal/*` กันเอง): Project Settings → Security → **Secure backend access with OIDC federation** → เปิด, Issuer mode **Team** ทั้ง `cvc-api` และ `cvc-agent`
+2. **OIDC** (api ↔ agent เรียก `/internal/*` กันเอง และ BotID ใน web): Project Settings → Security → **Secure backend access with OIDC federation** → เปิด, Issuer mode **Team** ทั้ง `cvc-api`, `cvc-agent` และ `cvc-web`
+   - **BotID ตรวจที่ `cvc-web`:** `checkBotId()` ใช้ได้เฉพาะ route ที่เบราว์เซอร์เรียกในโปรเจคที่ส่งหน้าเว็บ จึงตรวจใน route handler ของ web (`/api/auth/guest`, `/api/agent/runs`, `/api/agent/transcribe`, `/api/uploads/token`) แล้วส่งต่อพร้อม header `x-cvc-botid` ที่ api/agent เชื่อเฉพาะเมื่อมาพร้อม `x-cvc-edge` · ผู้ใช้ LINE (มี `app_metadata.line_sub`) ไม่ต้องผ่าน BotID · ถ้า BotID ใช้ไม่ได้ (เช่น ยังไม่เปิด OIDC ใน `cvc-web`) ระบบจะปล่อยผ่านพร้อม log error ใน `cvc-web` และใช้ rate limit แทน — ดู log นี้หลัง deploy
+   - (แนะนำ, Pro) `cvc-web` → Firewall → Rules → เปิด **Vercel BotID Deep Analysis**
 3. **Edge secret**: สร้างค่าสุ่มหนึ่งค่า (`openssl rand -hex 32`) → ใส่ `EDGE_SHARED_SECRET` **ค่าเดียวกัน** ทั้ง 3 project
 4. **Deployment Protection** (preview ถูกล็อกด้วย Vercel Authentication): Settings → Deployment Protection → **Protection Bypass for Automation** → สร้าง secret แล้วใช้ **ค่าเดียวกัน** ทั้ง 3 project → ใส่เป็น `PREVIEW_BYPASS_SECRET` ใน `cvc-web` (proxy แนบ header ให้เมื่อเรียก preview ของ api/agent) · ใน `cvc-agent` Vercel ส่ง secret ของ project เป็น `VERCEL_AUTOMATION_BYPASS_SECRET` ให้เอง ซึ่งใช้ให้ QStash เรียก preview ของ agent ได้ (§2.4 ข้อ 6)
 5. **Cron**: สร้างค่าสุ่ม → `CRON_SECRET` ใน `cvc-api` และ `cvc-agent` (Vercel ส่ง `Authorization: Bearer $CRON_SECRET` ให้เอง)

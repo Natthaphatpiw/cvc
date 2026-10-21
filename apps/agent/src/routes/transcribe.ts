@@ -3,7 +3,7 @@ import { requireEdge, requireUser } from '@cvc/auth';
 import { isPrivateBlobConfigured, readPrivateBlob } from '@cvc/media';
 import { TranscribeRequest, type TranscribeResponse } from '@cvc/schemas';
 import { Hono } from 'hono';
-import { ApiFailure, currentUser, enforceRateLimit, readJson, validationFailure, type AppEnv } from '../http';
+import { ApiFailure, assertHumanGuest, currentUser, enforceRateLimit, readJson, validationFailure, type AppEnv } from '../http';
 
 const MAX_AUDIO_BYTES = 25 * 1024 * 1024;
 /** 3 minutes plus a little slack for encoder padding. */
@@ -14,6 +14,7 @@ export function transcribeRoutes(): Hono<AppEnv> {
 
   r.post('/transcribe', requireEdge(), requireUser({ allowAnonymous: true }), async (c) => {
     const user = currentUser(c);
+    assertHumanGuest(c, user);
     const parsed = TranscribeRequest.safeParse(await readJson(c));
     if (!parsed.success) throw validationFailure(parsed.error.issues);
     const { assetPathname } = parsed.data;

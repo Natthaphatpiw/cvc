@@ -30,7 +30,7 @@ const authUpstreamError = () => new AppError(502, 'auth_upstream_error', MSG.ups
 // ---------------------------------------------------------------------------------------------------------------
 authRoutes.post('/guest', requireEdge(), async (c) => {
   if (!isGuestAuthConfigured()) throw new AppError(501, 'supabase_not_configured', MSG.supabaseNotConfigured);
-  await assertNotBot();
+  assertNotBot(c);
   await enforceRateLimit(c, `rl:guest:${clientIp(c)}`, 10, 3600);
 
   const parsed = GuestSessionRequest.safeParse(await readJson(c));

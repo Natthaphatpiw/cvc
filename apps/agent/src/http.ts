@@ -83,6 +83,20 @@ export function currentUser(c: AppContext): AuthUser {
   return c.get('user');
 }
 
+/**
+ * Paid work may only start through cvc-web's BotID route handlers, which mark the forwarded request with x-cvc-botid
+ * after checkBotId() passes (requireEdge has already proved it came through cvc-web, which strips client copies).
+ * Exempt: signed-in LINE users (line_sub is server-controlled app_metadata; any other Supabase account, including one
+ * made directly with the public key, must pass BotID) and local/dev callers.
+ */
+export function assertHumanGuest(c: AppContext, user: AuthUser): void {
+  if (process.env.NODE_ENV !== 'production' || process.env.VERCEL !== '1') return;
+  if (user.local) return;
+  if (!user.isAnonymous && user.lineSub) return;
+  if (c.req.header('x-cvc-botid') === 'human') return;
+  throw new ApiFailure(403, 'bot_detected', 'ระบบตรวจพบการใช้งานที่ผิดปกติ กรุณาลองใหม่จากเบราว์เซอร์');
+}
+
 export function isGuest(user: AuthUser): boolean {
   return user.isAnonymous || user.local;
 }

@@ -4,6 +4,7 @@ import { requireEdge, requireUser } from '@cvc/auth';
 import type { AppEnv } from '../types';
 import { AppError, MSG, invalidRequest } from '../lib/errors';
 import { env } from '../lib/env';
+import { assertHumanCaller } from '../lib/botid';
 import { enforceRateLimit, isRecord, readJson, str } from '../lib/http';
 
 export const uploadRoutes = new Hono<AppEnv>();
@@ -75,6 +76,7 @@ uploadRoutes.post('/token', requireEdge(), requireUser({ allowAnonymous: true })
   if (!body) throw invalidRequest([{ path: ['type'], message: 'expected blob.generate-client-token' }]);
 
   const user = c.get('user');
+  assertHumanCaller(c, user);
   await enforceRateLimit(c, `rl:upload:${user.id}`, 30, 3600);
   const prefix = `uploads/${user.id}/`;
 

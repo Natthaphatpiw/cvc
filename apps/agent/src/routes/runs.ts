@@ -14,6 +14,7 @@ import { streamSSE } from 'hono/streaming';
 import { isDemoRun } from '../env';
 import {
   ApiFailure,
+  assertHumanGuest,
   currentUser,
   enforceRateLimit,
   isGuest,
@@ -107,6 +108,7 @@ export function runRoutes(): Hono<AppEnv> {
 
   r.post('/runs', edge, user, async (c) => {
     const me = currentUser(c);
+    assertHumanGuest(c, me);
     const parsed = RunInput.safeParse(await readJson(c));
     if (!parsed.success) throw validationFailure(parsed.error.issues);
     const input = parsed.data;
