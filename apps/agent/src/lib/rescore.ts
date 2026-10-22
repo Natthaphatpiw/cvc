@@ -35,7 +35,8 @@ const pickIds = (recs: readonly Recommendation[]): string => recs.map((r) => r.c
 /**
  * Re-weights the stored RankedCreators (no LLM, §6.7 what-if) and rebuilds the recommendation order. Creators that
  * move into the top N without a narrative get template text and narrativeStatus 'pending'. Everything derived from the
- * picks (plan, next actions, recommended tiers, headline and summary) is rebuilt from the new order.
+ * picks (plan, next actions, recommended tiers, headline and summary) is rebuilt from the new order; the brand overview
+ * and the brief's sources (what the agent chose for the client) do not depend on the picks and pass through.
  */
 export async function rescoreResult(a: { result: FinalResult; weights: GroupWeights; preset: Objective }): Promise<FinalResult> {
   const { result, weights } = a;

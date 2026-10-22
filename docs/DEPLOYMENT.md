@@ -26,6 +26,7 @@
 | ScrapeCreators / Apify / Firecrawl | 1 ต่อเจ้า | agent | ไม่ใส่ key = โหมดตัวอย่าง (ข้อมูลสมมติ) |
 
 ทำไมแยก 3 project (ไม่ใช่ 1): ดู SYSTEM_DESIGN.md ADR-001 / ADR-008 — แยก secret (web ไม่มี DB/LLM key), แยก `maxDuration`/memory (agent ต้อง 800 s ต่อ step), deploy อิสระ, และ Vercel ข้าม build ของ project ที่ไม่เปลี่ยนให้อัตโนมัติ
+**ลำดับ deploy เมื่อ request schema กว้างขึ้น:** เพราะ deploy อิสระ release ที่แก้ `packages/schemas` ให้รับค่าที่ agent เวอร์ชันเก่าปฏิเสธ หรือเพิ่ม route ใหม่ของ agent (เช่น `campaign.objective` / `nCreators` เป็น `null` ได้ = ให้ระบบเลือก และ `POST /api/agent/assist`) ต้อง promote `cvc-agent` ก่อน รอจน Ready แล้วจึงให้ `cvc-web` ขึ้น production (promote เอง หรือพัก auto-deploy ของ `cvc-web` ไว้ใน release นั้น) · ถ้า web ใหม่ขึ้นก่อน ทุก run ที่ใช้ค่าเริ่มต้น "ระบบเลือกให้" จะได้ `400 invalid_request` จาก agent เก่า และแถบช่วยกรอกได้ `404` · ระหว่างที่ web ใหม่ยัง live อย่า rollback `cvc-agent` ตัวเดียว · ทางกลับกันปลอดภัย (web เก่าส่งค่าที่ระบุชัดเสมอ)
 ทำไมใช้คิว (ไม่รันใน request): ดู SYSTEM_DESIGN.md ADR-003 — pipeline ใช้เวลาหลายนาที ถ้ารันใน request เดียวจะชน timeout จึงให้ QStash เรียกทีละ step โดยแต่ละ step เป็น HTTP call แยกที่มีเวลาจำกัด (800 s), retry และ flow control ของตัวเอง
 
 ## 2. ลำดับการตั้งค่าครั้งแรก
@@ -114,7 +115,7 @@ pipeline ไม่รันใน request: `POST /api/agent/runs` สร้า�
 
 1. **Team slug**: Settings ของ team → URL `vercel.com/<team-slug>` → ใช้เป็น `VERCEL_TEAM_SLUG`
 2. **OIDC** (api ↔ agent เรียก `/internal/*` กันเอง และ BotID ใน web): Project Settings → Security → **Secure backend access with OIDC federation** → เปิด, Issuer mode **Team** ทั้ง `cvc-api`, `cvc-agent` และ `cvc-web`
-   - **BotID ตรวจที่ `cvc-web`:** `checkBotId()` ใช้ได้เฉพาะ route ที่เบราว์เซอร์เรียกในโปรเจคที่ส่งหน้าเว็บ จึงตรวจใน route handler ของ web (`/api/auth/guest`, `/api/agent/runs`, `/api/agent/transcribe`, `/api/uploads/token`) แล้วส่งต่อพร้อม header `x-cvc-botid` ที่ api/agent เชื่อเฉพาะเมื่อมาพร้อม `x-cvc-edge` · ผู้ใช้ LINE (มี `app_metadata.line_sub`) ไม่ต้องผ่าน BotID · ถ้า BotID ใช้ไม่ได้ (เช่น ยังไม่เปิด OIDC ใน `cvc-web`) ระบบจะปล่อยผ่านพร้อม log error ใน `cvc-web` และใช้ rate limit แทน — ดู log นี้หลัง deploy
+   - **BotID ตรวจที่ `cvc-web`:** `checkBotId()` ใช้ได้เฉพาะ route ที่เบราว์เซอร์เรียกในโปรเจคที่ส่งหน้าเว็บ จึงตรวจใน route handler ของ web (`/api/auth/guest`, `/api/agent/runs`, `/api/agent/transcribe`, `/api/agent/assist`, `/api/uploads/token`) แล้วส่งต่อพร้อม header `x-cvc-botid` ที่ api/agent เชื่อเฉพาะเมื่อมาพร้อม `x-cvc-edge` · ผู้ใช้ LINE (มี `app_metadata.line_sub`) ไม่ต้องผ่าน BotID · ถ้า BotID ใช้ไม่ได้ (เช่น ยังไม่เปิด OIDC ใน `cvc-web`) ระบบจะปล่อยผ่านพร้อม log error ใน `cvc-web` และใช้ rate limit แทน — ดู log นี้หลัง deploy
    - (แนะนำ, Pro) `cvc-web` → Firewall → Rules → เปิด **Vercel BotID Deep Analysis**
 3. **Edge secret**: สร้างค่าสุ่มหนึ่งค่า (`openssl rand -hex 32`) → ใส่ `EDGE_SHARED_SECRET` **ค่าเดียวกัน** ทั้ง 3 project
 4. **Deployment Protection** (preview ถูกล็อกด้วย Vercel Authentication): Settings → Deployment Protection → **Protection Bypass for Automation** → สร้าง secret แล้วใช้ **ค่าเดียวกัน** ทั้ง 3 project → ใส่เป็น `PREVIEW_BYPASS_SECRET` ใน `cvc-web` (proxy แนบ header ให้เมื่อเรียก preview ของ api/agent) · ใน `cvc-agent` Vercel ส่ง secret ของ project เป็น `VERCEL_AUTOMATION_BYPASS_SECRET` ให้เอง ซึ่งใช้ให้ QStash เรียก preview ของ agent ได้ (§2.4 ข้อ 6)
@@ -238,6 +239,8 @@ npm run db:test
 - [ ] `GET https://kol.<domain>/api/health` และ `/api/agent/health` → `ok: true`, `demo: false`
 - [ ] `/api/agent/health` → `configured.queue: true` และ runner = `upstash` (ไม่ใช่ `unavailable`)
 - [ ] สร้าง run 1 ครั้ง → `POST /api/agent/runs` ตอบ `202` ทันที · Upstash Console → Workflow เห็น run `wfr_…` เดินครบทุก step และ `analysis.runs.workflow_run_id` ตรงกัน · ยกเลิก run ระหว่างทางแล้ว run ใน console เป็น cancelled
+- [ ] release ที่ขยาย request schema (เช่น `campaign.objective: null`, `POST /api/agent/assist`): promote `cvc-agent` ก่อน แล้วตรวจว่า `POST /api/agent/assist` ไม่ตอบ `404` และ run ที่ส่ง `campaign.objective: null` ตอบ `202` จึง promote `cvc-web` (§1)
+- [ ] แถบช่วยกรอก: `POST https://kol.<domain>/api/agent/assist` ด้วย session guest → `200` (หรือ `503 assist_unavailable` เมื่อปิดโหมดตัวอย่างแต่ยังไม่มี OpenAI key) ไม่ใช่ `404`
 - [ ] `POST https://cvc-agent.vercel.app/api/workflow/kol-match` ตรงจากอินเทอร์เน็ต (ไม่มีลายเซ็น QStash) → ถูกปฏิเสธ
 - [ ] preview: สร้าง run บน preview ของ web แล้ว step ถูกเรียกที่ preview ของ agent (ไม่ใช่ production) และไม่ถูก Deployment Protection บล็อก
 - [ ] `https://cvc-api.vercel.app/api/me` ตรงจากอินเทอร์เน็ต → 401/403 (edge gate ทำงาน)

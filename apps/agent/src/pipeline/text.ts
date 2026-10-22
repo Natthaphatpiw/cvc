@@ -1,4 +1,4 @@
-import type { BrandCard, BrandProfile, CreatorRole, GroupWeights, Objective, RefData, ScoreGroup } from '@cvc/schemas';
+import type { BrandCard, BrandProfile, CreatorRole, GroupWeights, Objective, RefData, ScoreGroup, ValueSource } from '@cvc/schemas';
 
 // Thai template text used when an LLM narrative is unavailable, and for fields no LLM writes.
 
@@ -8,6 +8,16 @@ export const OBJECTIVE_TH: Record<Objective, string> = {
   conversion: 'ยอดขาย',
   tiktok_shop: 'ยอดขายผ่าน TikTok Shop',
   brand_building: 'การสร้างภาพลักษณ์แบรนด์',
+  ugc: 'คอนเทนต์ UGC',
+};
+
+/** Objective labels as the form and the results page show them (OBJECTIVE_TH reads after "เพื่อ"). */
+export const OBJECTIVE_LABEL_TH: Record<Objective, string> = {
+  awareness: 'รับรู้แบรนด์',
+  launch: 'เปิดตัวสินค้า',
+  conversion: 'เพิ่มยอดขาย',
+  tiktok_shop: 'TikTok Shop',
+  brand_building: 'สร้างแบรนด์ระยะยาว',
   ugc: 'คอนเทนต์ UGC',
 };
 
@@ -74,6 +84,20 @@ export function audienceSummaryTh(brand: BrandProfile): string {
     female === null ? '' : female >= 0.6 ? ' ส่วนใหญ่เป็นผู้หญิง' : female <= 0.4 ? ' ส่วนใหญ่เป็นผู้ชาย' : ' ทั้งผู้หญิงและผู้ชาย';
   const interests = seg.interests.slice(0, 3).join(', ');
   return `${seg.label}${ages ? ` อายุ ${ages} ปี` : ''}${gender}${interests ? ` สนใจ ${interests}` : ''}`;
+}
+
+/** Results-header overview when LLM1 wrote none: the one-liner, the audience, and what the agent chose for the client. */
+export function templateOverviewTh(brand: BrandProfile, ref: RefData, audienceSource: ValueSource): string {
+  const audience = audienceSummaryTh(brand);
+  const c = brand.campaign;
+  return [
+    brandOneLinerTh(brand, ref),
+    audienceSource === 'inferred' ? `ระบบวิเคราะห์ว่ากลุ่มลูกค้าหลักคือ ${audience}` : `กลุ่มลูกค้าหลัก: ${audience}`,
+    c.objectiveSource === 'inferred' ? `ระบบเลือกเป้าหมายแคมเปญ ${OBJECTIVE_LABEL_TH[c.objective]} ให้` : '',
+    c.objectiveSource === 'inferred' ? (c.objectiveReasonTh ?? '') : '',
+  ]
+    .filter((s) => s.length > 0)
+    .join(' ');
 }
 
 export function strongestGroup(groups: GroupWeights): ScoreGroup {

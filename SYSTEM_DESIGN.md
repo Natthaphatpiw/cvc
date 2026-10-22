@@ -443,7 +443,7 @@ flowchart TD
 
 | หัวข้อ | รายละเอียด |
 |---|---|
-| Input fields | `companyName` (**บังคับอย่างเดียว**), `facebookUrl?`, `websiteUrl?`, `tiktokUrl?`, `youtubeUrl?`, `instagramUrl?`, `personaIds[]` (`ref.audience_personas`), `audienceNotes?`, `assets[]` (Blob pathnames), `voiceTranscripts[]` {`assetPathname`, `text`, `userEdited`} (จาก `POST /api/agent/transcribe`; agent map pathname → `run_assets.id` ตอน insert), `campaign?` {`objective`, `budgetTHB`, `nCreators`, `preferredTiers[]`}, `exclusions?` {`competitors[]`, `handles[]`}, `options` {`reviewBrand`, `force`}, `noticeVersion` |
+| Input fields | `companyName` (**บังคับอย่างเดียว**), `facebookUrl?`, `websiteUrl?`, `tiktokUrl?`, `youtubeUrl?`, `instagramUrl?`, `personaIds[]` (`ref.audience_personas`), `audienceNotes?`, `assets[]` (Blob pathnames), `voiceTranscripts[]` {`assetPathname`, `text`, `userEdited`} (จาก `POST /api/agent/transcribe`; agent map pathname → `run_assets.id` ตอน insert), `campaign?` {`objective`, `budgetTHB`, `nCreators`, `preferredTiers[]`} (`objective` / `nCreators` เป็น `null` ได้ = ให้ระบบเลือก: brand step ใช้ `campaignSuggestion` ของ LLM1), `exclusions?` {`competitors[]`, `handles[]`}, `options` {`reviewBrand`, `force`}, `noticeVersion` |
 | Validation | zod `RunInput` · รูป ≤ 10 ไฟล์ (≤ 10 MB, png/jpeg/webp) · เสียง ≤ 3 นาที (≤ 25 MB, webm/mp4/m4a/mp3/wav) · ถ้าไม่มี URL เลย → เตือน "ผลลัพธ์อาจแม่นยำน้อยลง" แต่ยังรันได้ |
 | Asset ownership (กัน IDOR) | ทุก pathname ต้องขึ้นต้นด้วย `uploads/{sub}/` · `head(pathname)` ตรวจ `contentType`/`size` · agent เป็นผู้ insert `analysis.run_assets` เอง |
 | Safety | `omni-moderation-latest` (ฟรี, text + image) · BotID เฉพาะ JWT ที่ `is_anonymous=true` · rate limit: guest 3 runs/ชม. (key = client IP จาก edge) · LINE 10 runs/ชม. (key = `sub`) |
@@ -464,7 +464,8 @@ flowchart TD
   "company": { "name": "…", "nameTh": "…", "aliases": ["…"] },
   "urls": { "website": "https://…", "facebook": "https://facebook.com/…", "tiktok": null, "youtube": null, "instagram": null, "others": [] },
   "targetAudience": { "personaIds": ["th_genz_beauty_bkk", "first_jobber"], "freeText": "ผู้หญิงทำงาน 25-34 ผิวแพ้ง่าย", "fromVoice": "…", "fromImages": "…" },
-  "campaign": { "objective": "conversion", "budgetTHB": { "min": 100000, "max": 300000 }, "nCreators": 5, "preferredTiers": ["micro", "mid"] },
+  "campaign": { "objective": "conversion", "objectiveSource": "user|inferred", "budgetTHB": { "min": 100000, "max": 300000 }, "nCreators": 5, "nCreatorsSource": "user|inferred", "preferredTiers": ["micro", "mid"] },
+  // *Source "inferred" = ลูกค้าเว้นว่าง: ค่าเป็น placeholder ("conversion" / 5) จน brand step เขียนค่าที่ระบบเลือกกลับเข้า brief
   "constraints": { "competitors": ["…"], "excludeHandles": [], "mustInclude": [] },
   "imageFindings": [{ "assetId": "…", "type": "fb_page|tiktok_profile|product|brief|other", "facts": ["…"] }],
   "voiceTranscript": "…",
@@ -524,7 +525,9 @@ flowchart TD
     "source": "user_selected|inferred|mixed", "confidence": 0.7
   },
   "contentStyle": { "formats": ["short_video", "carousel"], "hooks": [], "themes": [], "fbEngagement": { "medianER": 0.0, "postsPerWeek": 0 } },
-  "campaign": { "objective": "awareness|conversion|tiktok_shop|brand_building|launch|ugc", "kpis": [], "budgetTHB": { "min": 0, "max": 0 }, "nCreators": 5, "preferredTiers": ["micro", "mid"], "formats": ["in_feed", "live", "affiliate"] },
+  "overviewTh": "",                                  // ย่อหน้าหัวหน้าผลวิเคราะห์ 3-4 ประโยค (LLM1) รวมสิ่งที่ระบบเลือกให้
+  // LLM1 ตอบ campaignSuggestion { objective, nCreators, reasonTh } ก่อน overviewTh เสมอ · code ใช้เฉพาะค่าที่ลูกค้าเว้นว่าง
+  "campaign": { "objective": "awareness|conversion|tiktok_shop|brand_building|launch|ugc", "objectiveSource": "user|inferred", "objectiveReasonTh": "", "nCreatorsSource": "user|inferred", "kpis": [], "budgetTHB": { "min": 0, "max": 0 }, "nCreators": 5, "preferredTiers": ["micro", "mid"], "formats": ["in_feed", "live", "affiliate"] },
   "creatorRequirements": {
     "mustCategories": [], "niceCategories": [], "desiredTone": [], "personaArchetypes": ["สายรีวิวสกินแคร์เชิงลึก"],
     "followers": { "min": 10000, "max": 500000 }, "minMedianViews": 20000, "languages": ["th"], "dialects": [],
@@ -587,7 +590,7 @@ flowchart TD
 |---|---|
 | Model | `gpt-6.1-sol` effort `medium` · **top-5 เป็นค่าเริ่มต้น** (`nCreators`, สูงสุด 10) · ขนานต่อ KOL + 1 call portfolio |
 | Input จาก code | ก่อนเรียก LLM4 code คำนวณ `ExpectedKpis` + `PlaybookHints` (role, formats, collaboration model, posting window) ต่อคน แล้ว `PortfolioPlan` + `NextAction[]` (§6.10) — LLM4 ได้รับเป็น input อ่านอย่างเดียว |
-| เขียน | `CuratorOutput` (§4.8) ต่อคน: `whyMatchTh[]` (อ้างอิง sub-score/evidence), `risksTh[]`, `storyline` {concept, hook 3 วินาที, format, CTA, sample caption, disclosure `#โฆษณา`}, `pitchAnglesTh[]`, `topVideoNotes[]`, `playbookText` (เหตุผลของ role, หมายเหตุรูปแบบความร่วมมือ, content angles, brief do/don't, การต่อรอง, risk → mitigation) · `PortfolioNarrative` 1 call: `headlineTh`, `consultantSummaryTh`, `mixTh`, `nextStepsTh[]` |
+| เขียน | `CuratorOutput` (§4.8) ต่อคน: `whyMatchTh[]` (อ้างอิง sub-score/evidence), `risksTh[]`, `fitSummaryTh` (สรุปว่าผู้ชมของครีเอเตอร์ตรงกับกลุ่มลูกค้าของแบรนด์อย่างไร เขียนหลังเหตุผลและความเสี่ยง), `storyline` {concept, hook 3 วินาที, format, CTA, sample caption, disclosure `#โฆษณา`}, `pitchAnglesTh[]`, `topVideoNotes[]`, `playbookText` (เหตุผลของ role, หมายเหตุรูปแบบความร่วมมือ, content angles, brief do/don't, การต่อรอง, risk → mitigation) · `PortfolioNarrative` 1 call: `headlineTh`, `consultantSummaryTh`, `mixTh`, `nextStepsTh[]` |
 | ห้าม | เขียนตัวเลข metric (ใช้ placeholder `{{metric:er}}` แล้ว code เติม) · เปลี่ยน role/format/ตัวเลขคาดการณ์/งบ (มาจาก code เท่านั้น) |
 | Checks | **code checks ก่อน** (ไม่มีตัวเลขดิบ, evidence refs มีจริง, disclosure ครบ, ความยาว) → critic LLM (luna) รันเฉพาะเมื่อ code checks ไม่ผ่าน หรือ sample 20% เพื่อ QA · revise ≤ 2 รอบ |
 | ล้มเหลว | **ไม่ทิ้ง KOL:** assemble จาก `RankedCreator` (handle, profileUrl, metrics, scores) + `narrativeStatus:"failed"` + `isPartial=true` · expected KPIs/playbook hints/plan/next actions ยังครบเพราะมาจาก code · ข้อความใช้ template ภาษาไทยจาก code (budget hard stop ก็ใช้ทางนี้) |
@@ -601,8 +604,8 @@ flowchart TD
   "redactedCreators": 0,
   "headlineTh": "แนะนำครีเอเตอร์ TikTok 5 คนสำหรับ <แบรนด์> เพื่อเพิ่มยอดขาย",   // ข้อสรุปหนึ่งประโยคใต้ชื่อหน้า (LLM4 หรือ template)
   "consultantSummaryTh": "",                         // สรุปแบบที่ปรึกษา (LLM4 จากตัวเลขที่ code คำนวณ)
-  "brand": { "name": "", "logoUrl": null, "oneLinerTh": "", "industry": "", "positioning": "", "audienceSummaryTh": "", "toneKeywords": [], "contentPillars": [], "evidenceRefs": ["E1"] },
-  "brief": { "objective": "conversion", "budgetTHB": { "min": 100000, "max": 300000 }, "nCreators": 5, "recommendedTiers": ["micro", "mid"], "budgetFitNoteTh": "", "keyMessagesTh": [] },
+  "brand": { "name": "", "logoUrl": null, "oneLinerTh": "", "overviewTh": "", "industry": "", "positioning": "", "audienceSummaryTh": "", "toneKeywords": [], "contentPillars": [], "evidenceRefs": ["E1"] },
+  "brief": { "objective": "conversion", "objectiveSource": "user|inferred", "objectiveReasonTh": "", "budgetTHB": { "min": 100000, "max": 300000 }, "nCreators": 5, "nCreatorsSource": "user|inferred", "audienceSource": "user|inferred", "recommendedTiers": ["micro", "mid"], "budgetFitNoteTh": "", "keyMessagesTh": [] },
   "methodology": {
     "preset": "conversion", "weights": { "fit": 0.35, "audience": 0.25, "performance": 0.2, "trust": 0.1, "cost": 0.1 },
     "effectiveDemographicWeight": 0.08,
@@ -628,7 +631,7 @@ flowchart TD
     "rubric": [{ "criterion": "audience_fit", "score": 2, "evidenceVideoIds": ["v1"] }],
     "suspectedInjection": false,
     "narrativeStatus": "ready|pending|failed",
-    "whyMatchTh": [{ "text": "", "evidenceRefs": ["E3"] }], "risksTh": [""],
+    "whyMatchTh": [{ "text": "", "evidenceRefs": ["E3"] }], "risksTh": [""], "fitSummaryTh": "",
     "storyline": { "conceptTh": "", "hookTh": "", "format": "in_feed|live|affiliate|series", "ctaTh": "", "sampleCaptionTh": "", "disclosure": "#โฆษณา" },
     "pitchAnglesTh": [""],
     "estFeeTHB": { "min": 15000, "max": 30000 }, "estCPV": 0.36,
@@ -700,7 +703,7 @@ flowchart TD
 // CuratorOutput v1 — output ของ LLM4 (narrative เท่านั้น ไม่มีตัวเลขดิบ)
 { "creatorId": "uuid",
   "whyMatchTh": [{ "text": "ER {{metric:er}} สูงกว่า median ของ tier", "evidenceRefs": ["E3"] }],
-  "risksTh": [""], "storyline": { "conceptTh": "", "hookTh": "", "format": "in_feed", "ctaTh": "", "sampleCaptionTh": "", "disclosure": "#โฆษณา" },
+  "risksTh": [""], "fitSummaryTh": "", "storyline": { "conceptTh": "", "hookTh": "", "format": "in_feed", "ctaTh": "", "sampleCaptionTh": "", "disclosure": "#โฆษณา" },
   "pitchAnglesTh": [""], "topVideoNotes": [{ "videoId": "", "whyTh": "" }],
   "playbookText": { "roleReasonTh": "", "collaborationNoteTh": "", "contentAnglesTh": [""], "briefDosTh": [""], "briefDontsTh": [""],
                     "negotiationTh": [""], "riskMitigations": [{ "riskTh": "", "mitigationTh": "" }] } }
@@ -2299,6 +2302,7 @@ insert into ref.kpi_benchmarks (objective, category_id, tier, metric, p25, p50, 
 | `rl:guest:{clientIp}` | 1 ชม. | จำกัดการสร้าง guest session |
 | `rl:run:{sub}` / `rl:run:ip:{clientIp}` | sliding 1 ชม. | LINE 10/ชม. · guest 3/ชม. |
 | `rl:chat:{sub}` | 1 นาที | 20 ข้อความ/นาที |
+| `rl:assist:{sub}` | 1 ชม. | แถบช่วยกรอกฟอร์ม 20 ครั้ง/ชม. ต่อผู้ใช้ |
 | `budget:run:{runId}` | 48 ชม. | budget guard (soft $4 / hard $6) |
 | `budget:research:{chatSessionId}` / `budget:evaluate:{chatSessionId}` | 24 ชม. | research ≤ 5, evaluate ≤ 3 ต่อ session |
 | `dedupe:run:{ownerId}:{inputHash}` | 24 ชม. | run เดิมของเจ้าของเดิมเท่านั้น |
@@ -2590,6 +2594,7 @@ sequenceDiagram
 | Method | Path | Auth | Description |
 |---|---|---|---|
 | POST | `/api/agent/transcribe` | Bearer (+BotID guest) | `{assetPathname}` → `{transcript, durationS}` (ตรวจ prefix, ≤ 3 นาที, rate-limited) |
+| POST | `/api/agent/assist` | Bearer (+BotID guest) | `{section: audience\|campaign, promptTh, companyName?, websiteUrl?, facebookUrl?}` → คำแนะนำกลุ่มลูกค้า (`personaIds`, `audienceNotes`) หรือแคมเปญ (`objective`, `budgetTHB`, `nCreators`) + `noteTh` · fast tier, 30 s · rate-limited (`rl:assist`) · 502/503/504 เป็นข้อความไทย |
 | POST | `/api/agent/runs` | Bearer (+BotID guest) | `{RunInput}` → `202 {runId, status, claimSecret?}` · dedupe เฉพาะ run ของเจ้าของเดิม · `force` ข้าม dedupe |
 | GET | `/api/agent/runs/:id` | Bearer (owner) | status, stage, progress_pct, warnings, resultId, etaSec |
 | GET | `/api/agent/runs/:id/stream?startIndex=` | Bearer (owner) | SSE progress (`ProgressEvent`) — อ่านด้วย fetch |

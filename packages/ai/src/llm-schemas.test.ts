@@ -3,8 +3,10 @@ import { zodSchema } from 'ai';
 import { describe, expect, it } from 'vitest';
 import type { z } from 'zod';
 import {
+  LlmAudienceAssist,
   LlmBrandProfile,
   LlmBrief,
+  LlmCampaignAssist,
   LlmCuratorOutput,
   LlmEvaluation,
   LlmEvidenceCard,
@@ -44,6 +46,8 @@ const SCHEMAS: [string, z.ZodType][] = [
   ['LlmEvaluation', LlmEvaluation],
   ['LlmCuratorOutput', LlmCuratorOutput],
   ['LlmPortfolioNarrative', LlmPortfolioNarrative],
+  ['LlmAudienceAssist', LlmAudienceAssist],
+  ['LlmCampaignAssist', LlmCampaignAssist],
 ];
 
 describe('LLM schemas are OpenAI strict-mode compatible', () => {
@@ -55,77 +59,82 @@ describe('LLM schemas are OpenAI strict-mode compatible', () => {
   });
 });
 
+function rawBrand(): z.infer<typeof LlmBrandProfile> {
+  return {
+    brand: {
+      industryId: 'not-a-category',
+      subCategories: ['sunscreen'],
+      products: [{ name: 'กันแดด', categoryId: 'beauty.skincare', priceBandTHB: { min: 390, max: 290 }, keyBenefits: ['บางเบา'], usp: null }],
+      pricePositioning: 'masstige',
+      personality: { toneKeywords: ['เป็นกันเอง'], formality: 3, humor: 0.5, energy: -1 },
+      languageStyle: { primary: 'th', englishMix: true, register: 'casual' },
+      contentPillars: [],
+      visualStyle: [],
+      regulatedCategory: 'cosmetics',
+    },
+    audience: {
+      segments: [
+        {
+          label: 'สาวทำงาน',
+          ageDist: [
+            { key: '25-34', share: 60 },
+            { key: '18-24', share: 40 },
+          ],
+          genderDist: [
+            { key: 'Female', share: 0.8 },
+            { key: 'male', share: 0.2 },
+          ],
+          regionDist: [],
+          interests: [],
+          painPoints: [],
+          purchaseDrivers: [],
+        },
+      ],
+      source: 'mixed',
+      confidence: 0.7,
+    },
+    contentStyle: { formats: [], hooks: [], themes: [], fbEngagement: { medianER: null, postsPerWeek: null } },
+    overviewTh: `  ${'ซันนี่สกินขายกันแดดสำหรับผิวแพ้ง่าย '.repeat(40)}`,
+    campaignSuggestion: { objective: 'awareness', nCreators: 12, reasonTh: 'แบรนด์ยังใหม่ในตลาด จึงควรเริ่มจากการสร้างการรับรู้' },
+    campaign: { kpis: ['orders'], formats: ['live'] },
+    creatorRequirements: {
+      mustCategories: ['beauty.skincare', 'made.up'],
+      niceCategories: [],
+      desiredTone: [],
+      personaArchetypes: [],
+      followers: { min: 1, max: 10 },
+      minMedianViews: null,
+      languages: ['th'],
+      dialects: [],
+      excludeKeywords: [],
+      excludeHandles: ['@Other'],
+      competitorBrands: ['คู่แข่งบี'],
+      exclusivityWindowDays: 900,
+      brandSafetyLevel: 'strict',
+    },
+    matchingQueries: {
+      criteria: [
+        { textTh: 'รีวิวสกินแคร์', textEn: 'skincare reviews', weight: 2 },
+        { textTh: 'ขายผ่านไลฟ์', textEn: 'live selling', weight: 2 },
+      ],
+      seedHashtags: ['#รีวิวกันแดด'],
+      keywordsTh: ['รีวิวกันแดด'],
+      keywordsEn: ['sunscreen review'],
+    },
+    evidence: [
+      { ref: 'E9', claim: 'no such card', url: null },
+      { ref: 'W1', claim: 'from search', url: 'https://news.example/a' },
+    ],
+    sourcesUnavailable: [],
+    unknowns: [],
+    confidence: 1.4,
+  };
+}
+
 describe('mapLlmBrandProfile', () => {
   it('maps distributions, validates category ids and keeps code-owned fields', () => {
     const brief = buildBaseBrief(runInput({ campaign: { objective: 'tiktok_shop', budgetTHB: { min: 100_000, max: 200_000 }, nCreators: 4, preferredTiers: ['micro'] } }));
-    const raw: z.infer<typeof LlmBrandProfile> = {
-      brand: {
-        industryId: 'not-a-category',
-        subCategories: ['sunscreen'],
-        products: [{ name: 'กันแดด', categoryId: 'beauty.skincare', priceBandTHB: { min: 390, max: 290 }, keyBenefits: ['บางเบา'], usp: null }],
-        pricePositioning: 'masstige',
-        personality: { toneKeywords: ['เป็นกันเอง'], formality: 3, humor: 0.5, energy: -1 },
-        languageStyle: { primary: 'th', englishMix: true, register: 'casual' },
-        contentPillars: [],
-        visualStyle: [],
-        regulatedCategory: 'cosmetics',
-      },
-      audience: {
-        segments: [
-          {
-            label: 'สาวทำงาน',
-            ageDist: [
-              { key: '25-34', share: 60 },
-              { key: '18-24', share: 40 },
-            ],
-            genderDist: [
-              { key: 'Female', share: 0.8 },
-              { key: 'male', share: 0.2 },
-            ],
-            regionDist: [],
-            interests: [],
-            painPoints: [],
-            purchaseDrivers: [],
-          },
-        ],
-        source: 'mixed',
-        confidence: 0.7,
-      },
-      contentStyle: { formats: [], hooks: [], themes: [], fbEngagement: { medianER: null, postsPerWeek: null } },
-      campaign: { kpis: ['orders'], formats: ['live'] },
-      creatorRequirements: {
-        mustCategories: ['beauty.skincare', 'made.up'],
-        niceCategories: [],
-        desiredTone: [],
-        personaArchetypes: [],
-        followers: { min: 1, max: 10 },
-        minMedianViews: null,
-        languages: ['th'],
-        dialects: [],
-        excludeKeywords: [],
-        excludeHandles: ['@Other'],
-        competitorBrands: ['คู่แข่งบี'],
-        exclusivityWindowDays: 900,
-        brandSafetyLevel: 'strict',
-      },
-      matchingQueries: {
-        criteria: [
-          { textTh: 'รีวิวสกินแคร์', textEn: 'skincare reviews', weight: 2 },
-          { textTh: 'ขายผ่านไลฟ์', textEn: 'live selling', weight: 2 },
-        ],
-        seedHashtags: ['#รีวิวกันแดด'],
-        keywordsTh: ['รีวิวกันแดด'],
-        keywordsEn: ['sunscreen review'],
-      },
-      evidence: [
-        { ref: 'E9', claim: 'no such card', url: null },
-        { ref: 'W1', claim: 'from search', url: 'https://news.example/a' },
-      ],
-      sourcesUnavailable: [],
-      unknowns: [],
-      confidence: 1.4,
-    };
-    const p = mapLlmBrandProfile(raw, { brief, evidence: [], personas: PERSONAS_SEED, categories: REF_SEED.categories, allowWebSearch: true });
+    const p = mapLlmBrandProfile(rawBrand(), { brief, evidence: [], personas: PERSONAS_SEED, categories: REF_SEED.categories, allowWebSearch: true });
     expect(BrandProfile.safeParse(p).success).toBe(true);
     expect(p.brand.industryId).toBe('beauty.skincare');
     expect(p.brand.products[0]?.priceBandTHB).toBeNull();
@@ -137,8 +146,18 @@ describe('mapLlmBrandProfile', () => {
     expect(p.creatorRequirements.exclusivityWindowDays).toBe(365);
     expect(p.creatorRequirements.excludeHandles).toEqual(['blocked_one', 'other']);
     expect(p.creatorRequirements.allowMinors).toBe(false);
-    expect(p.campaign).toMatchObject({ objective: 'tiktok_shop', nCreators: 4, budgetTHB: { min: 100_000, max: 200_000 } });
+    // The client set objective and creator count, so LLM1's suggestion (awareness, 12) is not applied.
+    expect(p.campaign).toMatchObject({
+      objective: 'tiktok_shop',
+      objectiveSource: 'user',
+      objectiveReasonTh: '',
+      nCreators: 4,
+      nCreatorsSource: 'user',
+      budgetTHB: { min: 100_000, max: 200_000 },
+    });
     expect(p.scoringPreset).toBe('tiktok_shop');
+    expect(p.overviewTh.startsWith('ซันนี่สกินขายกันแดด')).toBe(true);
+    expect(p.overviewTh.length).toBeLessThanOrEqual(900);
     expect(p.matchingQueries.criteria.map((c) => [c.id, c.weight])).toEqual([
       ['c1', 0.5],
       ['c2', 0.5],
@@ -146,5 +165,41 @@ describe('mapLlmBrandProfile', () => {
     expect(p.matchingQueries.seedHashtags).toEqual(['รีวิวกันแดด']);
     expect(p.evidence.map((e) => e.ref)).toEqual(['W1']);
     expect(p.confidence).toBe(1);
+  });
+});
+
+// Campaign values the client left to the agent (spec B): only those take LLM1's campaignSuggestion.
+describe('mapLlmBrandProfile campaign suggestion', () => {
+  const map = (campaign: { objective: 'conversion' | null; nCreators: number | null }) =>
+    mapLlmBrandProfile(rawBrand(), {
+      brief: buildBaseBrief(runInput({ campaign: { ...campaign, budgetTHB: null, preferredTiers: [] } })),
+      evidence: [],
+      personas: PERSONAS_SEED,
+      categories: REF_SEED.categories,
+      allowWebSearch: false,
+    });
+
+  it('applies the suggested objective and a clamped creator count when both were left empty', () => {
+    const p = map({ objective: null, nCreators: null });
+    expect(BrandProfile.safeParse(p).success).toBe(true);
+    expect(p.campaign).toMatchObject({
+      objective: 'awareness',
+      objectiveSource: 'inferred',
+      objectiveReasonTh: 'แบรนด์ยังใหม่ในตลาด จึงควรเริ่มจากการสร้างการรับรู้',
+      nCreators: 10,
+      nCreatorsSource: 'inferred',
+    });
+    expect(p.scoringPreset).toBe('awareness');
+  });
+
+  it('keeps an explicit conversion objective and only fills the creator count', () => {
+    const p = map({ objective: 'conversion', nCreators: null });
+    expect(p.campaign).toMatchObject({ objective: 'conversion', objectiveSource: 'user', objectiveReasonTh: '', nCreators: 10, nCreatorsSource: 'inferred' });
+    expect(p.scoringPreset).toBe('conversion');
+  });
+
+  it('keeps an explicit creator count and only fills the objective', () => {
+    const p = map({ objective: null, nCreators: 5 });
+    expect(p.campaign).toMatchObject({ objective: 'awareness', objectiveSource: 'inferred', nCreators: 5, nCreatorsSource: 'user' });
   });
 });

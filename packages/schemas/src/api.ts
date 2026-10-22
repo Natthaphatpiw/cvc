@@ -1,7 +1,7 @@
 import { z } from 'zod';
 import { GroupWeights } from './evaluation';
 import { FinalResult } from './result';
-import { Objective, RunStatus, Stage } from './common';
+import { MinMax, Objective, RunStatus, Stage } from './common';
 import { AudiencePersona } from './input';
 import { ProgressEvent } from './progress';
 import { Category } from './ref';
@@ -41,6 +41,37 @@ export type RunEventsResponse = z.infer<typeof RunEventsResponse>;
 export const TranscribeRequest = z.object({ assetPathname: z.string() });
 export const TranscribeResponse = z.object({ transcript: z.string(), durationS: z.number().nullable() });
 export type TranscribeResponse = z.infer<typeof TranscribeResponse>;
+
+/**
+ * POST /api/agent/assist: the form's AI prompt bar. The planner describes a need in Thai and the agent fills one form
+ * section (audience or campaign) for them to edit before submitting. The company fields are context only.
+ */
+export const AssistSection = z.enum(['audience', 'campaign']);
+export type AssistSection = z.infer<typeof AssistSection>;
+export const AssistRequest = z.object({
+  section: AssistSection,
+  promptTh: z.string().trim().min(2).max(500),
+  companyName: z.string().trim().max(200).nullable().default(null),
+  websiteUrl: z.string().trim().max(500).nullable().default(null),
+  facebookUrl: z.string().trim().max(500).nullable().default(null),
+});
+export type AssistRequest = z.infer<typeof AssistRequest>;
+export type AssistRequestInput = z.input<typeof AssistRequest>;
+
+/** Same limits as RunInput, so a suggestion drops straight into the form. personaIds are ids from the persona catalog. */
+export const AudienceAssist = z.object({ personaIds: z.array(z.string()).max(10), audienceNotes: z.string().max(2000) });
+export type AudienceAssist = z.infer<typeof AudienceAssist>;
+/** budgetTHB is null unless the planner mentioned an amount of money. */
+export const CampaignAssist = z.object({ objective: Objective, budgetTHB: MinMax.nullable(), nCreators: z.number().int().min(1).max(10) });
+export type CampaignAssist = z.infer<typeof CampaignAssist>;
+
+/** noteTh: one short Thai sentence explaining the suggestion. */
+export const AudienceAssistResponse = z.object({ section: z.literal('audience'), audience: AudienceAssist, noteTh: z.string() });
+export type AudienceAssistResponse = z.infer<typeof AudienceAssistResponse>;
+export const CampaignAssistResponse = z.object({ section: z.literal('campaign'), campaign: CampaignAssist, noteTh: z.string() });
+export type CampaignAssistResponse = z.infer<typeof CampaignAssistResponse>;
+export const AssistResponse = z.discriminatedUnion('section', [AudienceAssistResponse, CampaignAssistResponse]);
+export type AssistResponse = z.infer<typeof AssistResponse>;
 
 export const RescoreRequest = z.object({
   weights: GroupWeights.optional(),

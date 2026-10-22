@@ -1,6 +1,6 @@
 // Small number formatters for Thai stub text and metric placeholders. Kept local so @cvc/ai does not depend on the
 // UI formatting package; output matches @cvc/thai (Latin digits, '–' for missing values).
-import type { MinMax } from '@cvc/schemas';
+import type { MinMax, Objective } from '@cvc/schemas';
 
 export function fmtNumber(n: number | null | undefined, digits = 0): string {
   if (n == null || !Number.isFinite(n)) return '–';
@@ -35,3 +35,13 @@ export function fmtScore(x: number | null | undefined): string {
 }
 
 export const CONFIDENCE_TH: Record<'low' | 'medium' | 'high', string> = { low: 'ต่ำ', medium: 'ปานกลาง', high: 'สูง' };
+
+/** Thai objective labels as the form and results show them; also the glossary in the LLM1 prompt. */
+export const OBJECTIVE_LABEL_TH: Record<Objective, string> = {
+  awareness: 'รับรู้แบรนด์',
+  launch: 'เปิดตัวสินค้า',
+  conversion: 'เพิ่มยอดขาย',
+  tiktok_shop: 'TikTok Shop',
+  brand_building: 'สร้างแบรนด์ระยะยาว',
+  ugc: 'คอนเทนต์ UGC',
+};

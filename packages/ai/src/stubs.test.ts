@@ -63,12 +63,18 @@ describe('normalizeInput stub', () => {
     expect(brief.targetAudience.freeText).toContain('ผิวแพ้ง่าย');
     expect(brief.voiceTranscript).toBe('อยากได้คนรีวิวกันแดด');
     expect(brief.constraints.excludeHandles).toEqual(['blocked_one']);
-    expect(brief.campaign).toEqual({ objective: 'conversion', budgetTHB: null, nCreators: 5, preferredTiers: [] });
+    expect(brief.campaign).toEqual({ objective: 'conversion', objectiveSource: 'user', budgetTHB: null, nCreators: 5, nCreatorsSource: 'user', preferredTiers: [] });
     expect(brief.imageFindings).toEqual([]);
     expect(brief.missingFields).toEqual(expect.arrayContaining(['facebookUrl', 'tiktokUrl', 'budgetTHB']));
     expect(brief.missingFields).not.toContain('websiteUrl');
     expect(brief.confidence).toBeGreaterThan(0);
     expect(brief.confidence).toBeLessThanOrEqual(1);
+  });
+
+  it('marks an empty objective and creator count as inferred with placeholders', async () => {
+    const brief = await normalizeInput(runInput({ campaign: { objective: null, nCreators: null } }), { images: [], personas: PERSONAS_SEED });
+    expect(InputBrief.safeParse(brief).success).toBe(true);
+    expect(brief.campaign).toMatchObject({ objective: 'conversion', objectiveSource: 'inferred', nCreators: 5, nCreatorsSource: 'inferred' });
   });
 });
 
@@ -86,6 +92,11 @@ describe('researchBrand stub', () => {
     expect(brand.matchingQueries.criteria.reduce((s, c) => s + c.weight, 0)).toBeCloseTo(1, 5);
     expect(brand.sourcesUnavailable).toEqual(['website']);
     expect(brand.creatorRequirements.excludeHandles).toEqual(['blocked_one']);
+    expect(brand.overviewTh).toContain('ซันนี่สกิน');
+    expect(brand.overviewTh).toContain('กลุ่มลูกค้าหลักคือ สาว Gen Z สายบิวตี้ กทม.');
+    expect(brand.overviewTh).not.toContain('ระบบเลือกเป้าหมาย');
+    expect(brand.overviewTh).not.toMatch(/[\u{1F300}-\u{1FAFF}]/u);
+    expect(brand.campaign).toMatchObject({ objective: 'conversion', objectiveSource: 'user', objectiveReasonTh: '', nCreators: 5, nCreatorsSource: 'user' });
   });
 
   it('uses evidence cards for products, price tier and evidence refs', async () => {
@@ -108,6 +119,40 @@ describe('researchBrand stub', () => {
     expect(brand.evidence[0]).toMatchObject({ ref: 'E1', url: 'https://www.sunny-skin.example' });
     expect(brand.audience.source).toBe('inferred');
     expect(brand.sourcesUnavailable).toEqual([]);
+  });
+
+  it('infers audience, objective and creator count the client left empty, and says so in the overview', async () => {
+    const input = runInput({ personaIds: [], audienceNotes: null, campaign: { objective: null, nCreators: null } });
+    const brief = await normalizeInput(input, { images: [], personas: PERSONAS_SEED });
+    const card = EvidenceCard.parse({
+      source: 'website',
+      sourceUrl: 'https://www.sunny-skin.example',
+      products: [{ name: 'กันแดดสูตรอ่อนโยน', priceTHB: 390, notes: null }],
+      usp: [],
+      tone: ['เป็นกันเอง'],
+      priceTier: 'masstige',
+      audienceCues: [],
+      claims: [],
+      stats: {},
+    });
+    const brand = await researchBrand({ brief, evidence: [card], personas: PERSONAS_SEED, categories: REF_SEED.categories, allowWebSearch: false });
+    expect(BrandProfile.safeParse(brand).success).toBe(true);
+    expect(brand.audience).toMatchObject({ source: 'inferred' });
+    expect(brand.audience.segments.map((s) => s.label)).toEqual(['สาว Gen Z สายบิวตี้ กทม.']);
+    expect(brand.campaign).toMatchObject({ objective: 'conversion', objectiveSource: 'inferred', nCreators: 5, nCreatorsSource: 'inferred' });
+    expect(brand.campaign.objectiveReasonTh.length).toBeGreaterThan(0);
+    expect(brand.scoringPreset).toBe('conversion');
+    expect(brand.overviewTh).toContain('กันแดดสูตรอ่อนโยน');
+    expect(brand.overviewTh).toContain('ระบบวิเคราะห์ว่ากลุ่มลูกค้าหลักน่าจะเป็น สาว Gen Z สายบิวตี้ กทม.');
+    expect(brand.overviewTh).toContain('ระบบเลือกเป้าหมายแคมเปญ เพิ่มยอดขาย ให้');
+  });
+
+  it('picks an objective from cues in the client text and says when there is no evidence', async () => {
+    const input = runInput({ personaIds: [], audienceNotes: 'อยากขายผ่าน TikTok Shop', campaign: { objective: null } });
+    const brief = await normalizeInput(input, { images: [], personas: PERSONAS_SEED });
+    const brand = await researchBrand({ brief, evidence: [], personas: PERSONAS_SEED, categories: REF_SEED.categories, allowWebSearch: false });
+    expect(brand.campaign).toMatchObject({ objective: 'tiktok_shop', objectiveSource: 'inferred', nCreators: 5, nCreatorsSource: 'user' });
+    expect(brand.overviewTh).toContain('ยังไม่มีข้อมูลจากเพจหรือเว็บไซต์');
   });
 });
 
@@ -184,6 +229,9 @@ describe('curateCreator stub', () => {
     expect(out.storyline.sampleCaptionTh).toContain('#โฆษณา');
     expect(out.storyline.format).toBe('in_feed');
     expect(out.playbookText.negotiationTh[0]).toContain('฿15,000–30,000');
+    expect(out.fitSummaryTh).toContain('@creator_a');
+    expect(out.fitSummaryTh).toContain('18-24, 25-34');
+    expect(out.fitSummaryTh).toContain('ข้อควรระวังหลักคือ');
     expect(JSON.stringify(out)).not.toMatch(/[\u{1F300}-\u{1FAFF}]/u);
   });
 

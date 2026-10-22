@@ -23,9 +23,20 @@ import type {
   ScoreGroup,
   Tier,
   TierBenchmark,
+  ValueSource,
 } from '@cvc/schemas';
 import { formatCompact, formatDateTh, formatNumber, formatPct, formatTHB, formatTHBRange } from '@cvc/thai';
-import { GROUP_TH, OBJECTIVE_TH, ROLE_TH, audienceSummaryTh, brandIndustryTh, brandOneLinerTh, PRICE_TH, strongestGroup } from './text';
+import {
+  GROUP_TH,
+  OBJECTIVE_TH,
+  ROLE_TH,
+  audienceSummaryTh,
+  brandIndustryTh,
+  brandOneLinerTh,
+  PRICE_TH,
+  strongestGroup,
+  templateOverviewTh,
+} from './text';
 import type { CuratedItem, SourceRef } from './types';
 
 /** A candidate row that has been enriched and ranked. */
@@ -115,6 +126,8 @@ function fillCurator(c: CuratorOutput, v: MetricValues): CuratorOutput {
     ...c,
     whyMatchTh: c.whyMatchTh.map((w) => ({ ...w, text: f(w.text) })),
     risksTh: c.risksTh.map(f),
+    // curate checkpoints written before the field existed are read back without a parse
+    fitSummaryTh: f(c.fitSummaryTh ?? ''),
     storyline: {
       ...c.storyline,
       conceptTh: f(c.storyline.conceptTh),
@@ -174,6 +187,21 @@ function templateRisks(row: RankedRow): string[] {
   if ((m.sponsoredShare ?? 0) > 0.4) risks.push('สัดส่วนโพสต์โฆษณาค่อนข้างสูง ผู้ชมอาจตอบสนองต่อคอนเทนต์ขายของน้อยลง');
   if (row.ranked.missingFeatures.length > 0) risks.push('ข้อมูลบางด้านไม่ครบ คะแนนจึงคำนวณจากข้อมูลที่มี');
   return risks;
+}
+
+/** Fit paragraph for creators with neither an LLM4 narrative nor an LLM2b rationale. */
+function templateFitSummaryTh(row: RankedRow): string {
+  const g = row.ranked.groups;
+  const [first = 'fit', second = 'audience'] = [...SCORE_GROUPS].sort((a, b) => g[b] - g[a]);
+  const m = row.dossier.metrics;
+  const risk = templateRisks(row)[0];
+  return [
+    `@${row.dossier.profile.handle} โดดเด่นด้าน${GROUP_TH[first]}และ${GROUP_TH[second]} (คะแนน ${pct100(g[first])} และ ${pct100(g[second])} จาก 100)`,
+    m.medianViews !== null ? `ยอดวิวกลาง ${formatCompact(m.medianViews)} ต่อคลิป อัตราการมีส่วนร่วม ${formatPct(m.erViewsMedian)} จาก ${m.videosAnalyzed} คลิปล่าสุด` : '',
+    risk ? `ข้อควรระวัง: ${risk}` : '',
+  ]
+    .filter((s) => s.length > 0)
+    .join(' ');
 }
 
 function buildPlaybook(item: CuratedItem, curator: CuratorOutput | null, row: RankedRow, fee: MinMax, brandPillars: string[]): Playbook {
@@ -303,6 +331,7 @@ export function buildRecommendation(a: {
     narrativeStatus: curator ? 'ready' : item.status === 'ready' ? 'failed' : item.status,
     whyMatchTh: curator?.whyMatchTh ?? templateWhy(row, a.poolMedians),
     risksTh: curator?.risksTh ?? templateRisks(row),
+    fitSummaryTh: curator?.fitSummaryTh || row.evaluation?.rationaleTh || templateFitSummaryTh(row),
     storyline: curator?.storyline ?? null,
     pitchAnglesTh: curator?.pitchAnglesTh ?? [],
     estFeeTHB: fee,
@@ -423,6 +452,8 @@ export function buildFinalResult(a: {
   brand: BrandProfile;
   ref: RefData;
   objective: Objective;
+  /** whether the client gave the target audience (audienceSourceOf the brief) */
+  audienceSource: ValueSource;
   weights: GroupWeights;
   budgetTHB: MinMax | null;
   nCreators: number;
@@ -470,6 +501,7 @@ export function buildFinalResult(a: {
       name: b.brand.name,
       logoUrl: null,
       oneLinerTh: brandOneLinerTh(b, a.ref),
+      overviewTh: b.overviewTh || templateOverviewTh(b, a.ref, a.audienceSource),
       industry: brandIndustryTh(b, a.ref),
       positioning: PRICE_TH[b.brand.pricePositioning],
       audienceSummaryTh: audienceSummaryTh(b),
@@ -477,10 +509,15 @@ export function buildFinalResult(a: {
       contentPillars: b.brand.contentPillars,
       evidenceRefs: b.evidence.map((e) => e.ref),
     },
+    // The brand step copied the brief's sources onto the profile (applyUserConstraints); old profiles parse as 'user'.
     brief: {
       objective: a.objective,
+      objectiveSource: b.campaign.objectiveSource ?? 'user',
+      objectiveReasonTh: b.campaign.objectiveReasonTh ?? '',
       budgetTHB: a.budgetTHB,
       nCreators: a.nCreators,
+      nCreatorsSource: b.campaign.nCreatorsSource ?? 'user',
+      audienceSource: a.audienceSource,
       recommendedTiers: tiers,
       budgetFitNoteTh: a.plan.budgetFitTh,
       keyMessagesTh: keyMessages,

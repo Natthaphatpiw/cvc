@@ -3,6 +3,10 @@ import { z } from 'zod';
 export const Objective = z.enum(['awareness', 'launch', 'conversion', 'tiktok_shop', 'brand_building', 'ugc']);
 export type Objective = z.infer<typeof Objective>;
 
+/** Who set a brief value: the client ('user'), or the agent because the client left it empty ('inferred'). */
+export const ValueSource = z.enum(['user', 'inferred']);
+export type ValueSource = z.infer<typeof ValueSource>;
+
 export const Tier = z.enum(['nano', 'micro', 'mid', 'macro', 'mega']);
 export type Tier = z.infer<typeof Tier>;
 

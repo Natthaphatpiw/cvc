@@ -115,6 +115,8 @@ export const CuratorOutput = z.object({
   creatorId: z.string(),
   whyMatchTh: z.array(z.object({ text: z.string(), evidenceRefs: z.array(z.string()) })),
   risksTh: z.array(z.string()),
+  /** 3-4 Thai sentences on how the creator fits the brand and its target customers, ending with the main caveat */
+  fitSummaryTh: z.string().default(''),
   storyline: z.object({
     conceptTh: z.string(),
     hookTh: z.string(),

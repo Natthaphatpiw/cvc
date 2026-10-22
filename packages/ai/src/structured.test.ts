@@ -1,9 +1,10 @@
 import { KolEvaluation, PERSONAS_SEED, REF_SEED } from '@cvc/schemas';
 import { MockLanguageModelV4 } from 'ai/test';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { z } from 'zod';
 import { buildBaseBrief } from './stages/normalize';
 import { buildStubBrandProfile } from './stubs/brand';
-import { dossier, runInput, setStubEnv } from './test/fixtures';
+import { dossier, hints, kpis, ranked, runInput, setStubEnv } from './test/fixtures';
 
 const mocks = vi.hoisted(() => ({ model: null as unknown }));
 
@@ -12,7 +13,8 @@ vi.mock('./models', async (importOriginal) => {
   return { ...actual, languageModel: () => ({ id: 'gpt-6.1-sol', model: mocks.model }) };
 });
 
-const { evaluateCreator } = await import('./index');
+const { curateCreator, evaluateCreator } = await import('./index');
+const { generateStructured } = await import('./structured');
 
 const usage = { inputTokens: { total: 1000, noCache: 800, cacheRead: 200, cacheWrite: undefined }, outputTokens: { total: 300, text: 200, reasoning: 100 } };
 const result = (json: unknown) => ({
@@ -78,6 +80,31 @@ describe('generateStructured via evaluateCreator (mock model)', () => {
     expect(e.rubric.find((r) => r.criterion === 'audience_fit')?.evidenceVideoIds).toEqual([]);
   });
 
+  it('keeps a schema-valid first answer with its issues when the repair turn fails', async () => {
+    let calls = 0;
+    mocks.model = new MockLanguageModelV4({
+      doGenerate: async () => {
+        calls += 1;
+        if (calls === 1) return result({ n: 1 });
+        throw new DOMException('The operation was aborted.', 'AbortError');
+      },
+    });
+    const schema = z.object({ n: z.number() });
+    const out = await generateStructured({
+      stage: 'test_repair_failure',
+      tier: 'fast',
+      effort: 'low',
+      instructions: 'Return n.',
+      userContent: 'n',
+      llmSchema: schema,
+      toDomain: (raw) => raw,
+      domainSchema: schema,
+      check: (v) => (v.n === 1 ? ['n: must be 2'] : []),
+    });
+    expect(calls).toBe(2);
+    expect(out).toEqual({ value: { n: 1 }, issues: ['n: must be 2'], sourceUrls: [] });
+  });
+
   it('repairs half an emoji in provider text before the request (the API rejects it as invalid JSON)', async () => {
     const model = new MockLanguageModelV4({ doGenerate: [result(evaluation(['v1']))] });
     mocks.model = model;
@@ -88,5 +115,49 @@ describe('generateStructured via evaluateCreator (mock model)', () => {
     const prompt = JSON.stringify(model.doGenerateCalls[0]?.prompt);
     expect(prompt).toContain('รีวิวสกินแคร์ 😍\uFFFD');
     expect(prompt).not.toMatch(/\\ud83d/i);
+  });
+});
+
+// LLM4 fitSummaryTh (spec C): the numbers rule covers it like every other narrative field.
+const curatorRaw = (fitSummaryTh: string) => ({
+  whyMatchTh: [{ text: 'ยอดวิวกลาง {{metric:median_views}} ต่อคลิป', evidenceRefs: ['v1'] }],
+  risksTh: ['ข้อมูลผู้ชมเป็นค่าประมาณ'],
+  fitSummaryTh,
+  storyline: { conceptTh: 'เล่าการใช้กันแดดในวันทำงาน', hookTh: 'เปิดด้วยแดดจัดกลางเมือง', format: 'in_feed', ctaTh: 'กดลิงก์ในโปรไฟล์', sampleCaptionTh: 'กันแดดที่ใช้ทุกวัน', disclosure: '#โฆษณา' },
+  pitchAnglesTh: ['ชวนรีวิวจากประสบการณ์จริง'],
+  topVideoNotes: [{ videoId: 'v2', whyTh: 'คลิปรีวิวที่ผู้ชมสนใจ' }],
+  playbookText: {
+    roleReasonTh: 'เหมาะกับการกระตุ้นยอดขาย',
+    collaborationNoteTh: 'ค่าจ้างประมาณ {{metric:fee_range}}',
+    contentAnglesTh: ['รีวิวการใช้จริง'],
+    briefDosTh: ['ใส่ #โฆษณา'],
+    briefDontsTh: ['ห้ามอ้างสรรพคุณเกินจริง'],
+    negotiationTh: ['เริ่มเจรจาที่ {{metric:fee_range}}'],
+    riskMitigations: [{ riskTh: 'ข้อมูลผู้ชมน้อย', mitigationTh: 'เริ่มจากหนึ่งคลิปแล้ววัดผล' }],
+  },
+});
+
+describe('curateCreator fit summary (mock model)', () => {
+  it('requires fitSummaryTh, repairs raw numbers in it and fills the audience placeholders', async () => {
+    const model = new MockLanguageModelV4({
+      doGenerate: [
+        result(curatorRaw('ผู้ชมอายุ 18-24 ตรงกับกลุ่มลูกค้าของแบรนด์')),
+        result(curatorRaw('ผู้ชมส่วนใหญ่อายุ {{metric:audience_age_top}} ตรงกับกลุ่มลูกค้าอายุ {{metric:brand_age_top}} ข้อควรระวังคือข้อมูลผู้ชมเป็นค่าประมาณ')),
+      ],
+    });
+    mocks.model = model;
+    const brand = buildStubBrandProfile({ brief: buildBaseBrief(runInput()), evidence: [], personas: PERSONAS_SEED, categories: REF_SEED.categories, allowWebSearch: false });
+
+    const out = await curateCreator({ brand, dossier: dossier(), ranked: ranked(), evaluation: null, hints, kpis: kpis() });
+
+    const first = model.doGenerateCalls[0];
+    expect(first?.responseFormat).toMatchObject({ type: 'json', name: 'llm4_curate_creator' });
+    expect((first?.responseFormat as { schema?: { required?: string[] } }).schema?.required).toContain('fitSummaryTh');
+    const userPrompt = JSON.stringify(first?.prompt);
+    expect(userPrompt).toContain('Creator audience signals');
+    expect(userPrompt).toContain('{{metric:audience_age_top}} = 18-24, 25-34');
+    expect(model.doGenerateCalls).toHaveLength(2);
+    expect(JSON.stringify(model.doGenerateCalls[1]?.prompt)).toContain('fitSummaryTh: contains raw numbers');
+    expect(out.fitSummaryTh).toBe('ผู้ชมส่วนใหญ่อายุ 18-24, 25-34 ตรงกับกลุ่มลูกค้าอายุ 18-24, 25-34 ข้อควรระวังคือข้อมูลผู้ชมเป็นค่าประมาณ');
   });
 });

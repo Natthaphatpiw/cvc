@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { AudienceSource, Confidence, EvidenceSourceType, MinMax, NarrativeStatus, Objective, Tier } from './common';
+import { AudienceSource, Confidence, EvidenceSourceType, MinMax, NarrativeStatus, Objective, Tier, ValueSource } from './common';
 import { ExpectedKpis, NextAction, Playbook, PortfolioPlan } from './consultant';
 import { GroupWeights as GroupWeightsShape, RubricScore, SubScores } from './evaluation';
 
@@ -50,6 +50,8 @@ export const Recommendation = z.object({
   narrativeStatus: NarrativeStatus,
   whyMatchTh: z.array(z.object({ text: z.string(), evidenceRefs: z.array(z.string()) })),
   risksTh: z.array(z.string()),
+  /** paragraph on how this creator fits the brand and its target customers (empty in results made before it existed) */
+  fitSummaryTh: z.string().default(''),
   storyline: z
     .object({
       conceptTh: z.string(),
@@ -111,6 +113,8 @@ export const FinalResult = z.object({
     name: z.string(),
     logoUrl: z.string().nullable(),
     oneLinerTh: z.string(),
+    /** the header paragraph: what the analysis learned about the brand (and what it inferred for the client) */
+    overviewTh: z.string().default(''),
     industry: z.string(),
     positioning: z.string(),
     audienceSummaryTh: z.string(),
@@ -120,8 +124,13 @@ export const FinalResult = z.object({
   }),
   brief: z.object({
     objective: Objective,
+    /** 'inferred' = the client left it empty and the agent chose it */
+    objectiveSource: ValueSource.default('user'),
+    objectiveReasonTh: z.string().default(''),
     budgetTHB: MinMax.nullable(),
     nCreators: z.number().int(),
+    nCreatorsSource: ValueSource.default('user'),
+    audienceSource: ValueSource.default('user'),
     recommendedTiers: z.array(Tier),
     budgetFitNoteTh: z.string(),
     keyMessagesTh: z.array(z.string()),

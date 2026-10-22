@@ -17,6 +17,8 @@ import { loadEnrichSummary } from '../candidates';
 import {
   MSG,
   RUN_INACTIVE,
+  audienceSourceOf,
+  briefOf,
   budgetState,
   campaignOf,
   emitProgress,
@@ -200,6 +202,7 @@ export async function finalizeStep(runId: string): Promise<FinalizeCheckpoint> {
       brand,
       ref,
       objective,
+      audienceSource: audienceSourceOf(briefOf(run)),
       weights: PRESETS[objective],
       budgetTHB,
       nCreators,

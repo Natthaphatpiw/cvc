@@ -53,9 +53,13 @@ export function renderResultDigest(result: FinalResult): string {
   const lines = [
     `RESULT DIGEST (result ${result.resultId}, version ${result.version}, generated ${result.generatedAt}${result.isDemo ? ', demo data with fictional creators' : ''})`,
     `Brand: ${truncate(result.brand.name, 120)} | industry=${result.brand.industry} | positioning=${result.brand.positioning}`,
-    `Brand summary: ${truncate(result.brand.oneLinerTh, 300)}`,
-    `Audience: ${truncate(result.brand.audienceSummaryTh, 300)}`,
-    `Brief: objective=${result.brief.objective} | budget=${fmtTHBRange(result.brief.budgetTHB)} | nCreators=${result.brief.nCreators} | recommendedTiers=${result.brief.recommendedTiers.join(',') || '-'}`,
+    `Brand summary: ${truncate(result.brand.overviewTh || result.brand.oneLinerTh, 900)}`,
+    `Audience${result.brief.audienceSource === 'inferred' ? ' (inferred by the agent, the client gave none)' : ''}: ${truncate(result.brand.audienceSummaryTh, 300)}`,
+    `Brief: objective=${result.brief.objective}${
+      result.brief.objectiveSource === 'inferred' ? ` (chosen by the agent: ${truncate(result.brief.objectiveReasonTh || '-', 200)})` : ''
+    } | budget=${fmtTHBRange(result.brief.budgetTHB)} | nCreators=${result.brief.nCreators}${
+      result.brief.nCreatorsSource === 'inferred' ? ' (chosen by the agent)' : ''
+    } | recommendedTiers=${result.brief.recommendedTiers.join(',') || '-'}`,
     `Scoring weights: fit=${result.methodology.weights.fit} audience=${result.methodology.weights.audience} performance=${result.methodology.weights.performance} trust=${result.methodology.weights.trust} cost=${result.methodology.weights.cost} (preset ${result.methodology.preset})`,
     `Candidates scanned=${result.methodology.candidatesScanned}, evaluated=${result.methodology.candidatesEvaluated}, data as of ${result.methodology.dataAsOf}`,
     'Recommended creators:',

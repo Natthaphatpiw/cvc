@@ -56,10 +56,13 @@ export function buildBaseBrief(input: RunInput): InputBrief {
       fromVoice: null,
       fromImages: null,
     },
+    // Left empty (null): a placeholder until the brand step resolves it from LLM1's suggestion.
     campaign: {
-      objective: input.campaign.objective,
+      objective: input.campaign.objective ?? 'conversion',
+      objectiveSource: input.campaign.objective == null ? 'inferred' : 'user',
       budgetTHB: input.campaign.budgetTHB,
-      nCreators: input.campaign.nCreators,
+      nCreators: input.campaign.nCreators ?? 5,
+      nCreatorsSource: input.campaign.nCreators == null ? 'inferred' : 'user',
       preferredTiers: [...new Set(input.campaign.preferredTiers)],
     },
     constraints: {
@@ -78,12 +81,13 @@ export function buildBaseBrief(input: RunInput): InputBrief {
 }
 
 /**
- * Merges LLM hints into the base brief. Form values win; a campaign hint only replaces a form value that is still at
- * its schema default (objective 'conversion', no budget, 5 creators, no tiers) because the form cannot tell whether
- * the user chose the default on purpose.
+ * Merges LLM hints into the base brief. Form values win: an objective or creator-count hint only fills a value the
+ * client left to the agent (source 'inferred'), and then the source becomes 'user' because the client did state it in
+ * the notes or the voice note. Budget and tiers fill only when the form has none.
  */
 export function mergeBriefHints(base: InputBrief, llm: LlmBrief, imagePathnames: readonly string[]): InputBrief {
   const h = llm.campaignHints;
+  const objectiveHint = base.campaign.objectiveSource === 'inferred' ? h.objective : null;
   const budgetHint =
     h.budgetMinTHB != null || h.budgetMaxTHB != null
       ? (() => {
@@ -92,7 +96,8 @@ export function mergeBriefHints(base: InputBrief, llm: LlmBrief, imagePathnames:
           return max > 0 ? { min, max } : null;
         })()
       : null;
-  const nCreatorsHint = h.nCreators != null && h.nCreators >= 1 && h.nCreators <= 10 ? Math.round(h.nCreators) : null;
+  const nCreatorsHint =
+    base.campaign.nCreatorsSource === 'inferred' && h.nCreators != null && h.nCreators >= 1 && h.nCreators <= 10 ? Math.round(h.nCreators) : null;
   const mainUrls = new Set(Object.values(base.urls).filter((u): u is string => typeof u === 'string'));
   const others = uniqText(llm.extraUrls.map((u) => canonicalUrl(u)).filter((u): u is string => u != null && !mainUrls.has(u)));
   const allowedPaths = new Set(imagePathnames);
@@ -112,9 +117,11 @@ export function mergeBriefHints(base: InputBrief, llm: LlmBrief, imagePathnames:
       fromImages: imagePathnames.length ? llm.audienceFromImages?.trim() || null : null,
     },
     campaign: {
-      objective: base.campaign.objective === 'conversion' && h.objective ? h.objective : base.campaign.objective,
+      objective: objectiveHint ?? base.campaign.objective,
+      objectiveSource: objectiveHint ? 'user' : base.campaign.objectiveSource,
       budgetTHB: base.campaign.budgetTHB ?? budgetHint,
-      nCreators: base.campaign.nCreators === 5 && nCreatorsHint ? nCreatorsHint : base.campaign.nCreators,
+      nCreators: nCreatorsHint ?? base.campaign.nCreators,
+      nCreatorsSource: nCreatorsHint ? 'user' : base.campaign.nCreatorsSource,
       preferredTiers: base.campaign.preferredTiers.length ? base.campaign.preferredTiers : [...new Set(h.preferredTiers)],
     },
     constraints: {

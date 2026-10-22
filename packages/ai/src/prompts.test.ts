@@ -1,6 +1,7 @@
 import { PERSONAS_SEED, REF_SEED } from '@cvc/schemas';
 import { describe, expect, it } from 'vitest';
-import { buildBaseBrief } from './stages/normalize';
+import type { LlmBrief } from './llm-schemas';
+import { buildBaseBrief, mergeBriefHints } from './stages/normalize';
 import { fillMetricPlaceholders, mapCuratorOutput, narrativeIssues } from './stages/curate';
 import { buildStubBrandProfile } from './stubs/brand';
 import { buildStubCuratorOutput } from './stubs/curate';
@@ -63,6 +64,14 @@ describe('curator placeholders and checks', () => {
     expect(issues[1]).toContain('unknown placeholder');
   });
 
+  it('ignores digits inside allowed literals such as segment labels', () => {
+    const texts = [{ path: 'fitSummaryTh', text: 'ผู้ชมตรงกับกลุ่มวัยเกษียณ/50+ ของแบรนด์' }];
+    expect(narrativeIssues(texts, values, ['วัยเกษียณ/50+'])).toEqual([]);
+    const issues = narrativeIssues(texts, values);
+    expect(issues).toHaveLength(1);
+    expect(issues[0]).toContain('raw numbers (50)');
+  });
+
   it('mapCuratorOutput drops refs and video ids that are not in the dossier', () => {
     const brief = buildBaseBrief(runInput());
     const brand = buildStubBrandProfile({ brief, evidence: [], personas: PERSONAS_SEED, categories: REF_SEED.categories, allowWebSearch: false });
@@ -83,5 +92,47 @@ describe('curator placeholders and checks', () => {
     expect(out.topVideoNotes.map((n) => n.videoId)).toEqual(['v2']);
     expect(out.storyline.sampleCaptionTh).toBe('ลองใช้แล้ว #โฆษณา');
     expect(out.storyline.disclosure).toBe('#โฆษณา');
+  });
+});
+
+describe('values left to the agent', () => {
+  const hints = (campaignHints: Partial<LlmBrief['campaignHints']>): LlmBrief => ({
+    nameTh: null,
+    aliases: [],
+    audienceFreeText: null,
+    audienceFromVoice: null,
+    audienceFromImages: null,
+    imageFindings: [],
+    campaignHints: { objective: null, budgetMinTHB: null, budgetMaxTHB: null, nCreators: null, preferredTiers: [], ...campaignHints },
+    mustInclude: [],
+    extraCompetitors: [],
+    extraUrls: [],
+  });
+
+  it('LLM0 hints fill only an objective or creator count left empty, and the client then counts as the source', () => {
+    const empty = buildBaseBrief(runInput({ campaign: { objective: null, nCreators: null } }));
+    const filled = mergeBriefHints(empty, hints({ objective: 'tiktok_shop', nCreators: 3 }), []);
+    expect(filled.campaign).toMatchObject({ objective: 'tiktok_shop', objectiveSource: 'user', nCreators: 3, nCreatorsSource: 'user' });
+    const none = mergeBriefHints(empty, hints({}), []);
+    expect(none.campaign).toMatchObject({ objective: 'conversion', objectiveSource: 'inferred', nCreators: 5, nCreatorsSource: 'inferred' });
+    // An explicit 'conversion' / 5 is the client's choice now, not a default a hint may replace.
+    const chosen = buildBaseBrief(runInput({ campaign: { objective: 'conversion', nCreators: 5 } }));
+    expect(mergeBriefHints(chosen, hints({ objective: 'awareness', nCreators: 8 }), []).campaign).toMatchObject({ objective: 'conversion', nCreators: 5 });
+  });
+
+  it('LLM1 gets the persona catalog and what was left to it when the client gave no audience or objective', () => {
+    const brief = buildBaseBrief(runInput({ personaIds: [], audienceNotes: null, campaign: { objective: null } }));
+    const prompt = buildBrandUserContent({ brief, evidence: [], personas: PERSONAS_SEED, categories: REF_SEED.categories });
+    expect(prompt).toContain('Persona catalog (reference only, for naming inferred segments)');
+    expect(prompt).toContain('silver_age');
+    expect(prompt).toContain('Left to the agent by the client (set by code): target audience (infer it from the evidence); campaign objective');
+    expect(prompt).toContain('"objective":null,"objectiveSource":"inferred"');
+    expect(prompt).toContain('"nCreators":5,"nCreatorsSource":"user"');
+
+    const given = buildBaseBrief(runInput());
+    const selected = PERSONAS_SEED.filter((p) => given.targetAudience.personaIds.includes(p.id));
+    const plain = buildBrandUserContent({ brief: given, evidence: [], personas: selected, categories: REF_SEED.categories });
+    expect(plain).not.toContain('Persona catalog');
+    expect(plain).toContain('Left to the agent by the client (set by code): nothing');
   });
 });

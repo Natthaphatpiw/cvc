@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { Channel, MinMax, Objective, Tier } from './common';
+import { Channel, MinMax, Objective, Tier, ValueSource } from './common';
 
 /** Voice note transcribed before submit (POST /api/agent/transcribe), possibly edited by the user. */
 export const VoiceTranscript = z.object({
@@ -17,10 +17,11 @@ export const RunAsset = z.object({
 });
 export type RunAsset = z.infer<typeof RunAsset>;
 
+/** objective / nCreators null = the client left it to the agent (resolved in the brand step from LLM1's suggestion). */
 export const CampaignInput = z.object({
-  objective: Objective.default('conversion'),
+  objective: Objective.nullable().default('conversion'),
   budgetTHB: MinMax.nullable().default(null),
-  nCreators: z.number().int().min(1).max(10).default(5),
+  nCreators: z.number().int().min(1).max(10).nullable().default(5),
   preferredTiers: z.array(Tier).default([]),
 });
 export type CampaignInput = z.infer<typeof CampaignInput>;
@@ -72,10 +73,16 @@ export const InputBrief = z.object({
     fromVoice: z.string().nullable(),
     fromImages: z.string().nullable(),
   }),
+  /**
+   * A value the client left empty has source 'inferred' and holds a placeholder ('conversion' / 5) until the brand
+   * step writes the resolved value back.
+   */
   campaign: z.object({
     objective: Objective,
+    objectiveSource: ValueSource.default('user'),
     budgetTHB: MinMax.nullable(),
     nCreators: z.number().int(),
+    nCreatorsSource: ValueSource.default('user'),
     preferredTiers: z.array(Tier),
   }),
   constraints: z.object({ competitors: z.array(z.string()), excludeHandles: z.array(z.string()), mustInclude: z.array(z.string()) }),

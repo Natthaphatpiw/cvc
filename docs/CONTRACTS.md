@@ -22,10 +22,17 @@ Conventions for every package:
 Zod schemas + types for every contract: `RunInput`, `InputBrief`, `AudiencePersona`, `BrandProfile`, `EvidenceCard`,
 `CandidateRef`, `CreatorProfile`, `CreatorVideo`, `CreatorMetrics`, `AudienceEstimate`, `CreatorDossier`,
 `KolEvaluation`, `SubScores`, `GroupWeights`, `RankedCreator`, `ExpectedKpis`, `Playbook`, `NextAction`,
-`PortfolioPlan`, `CuratorOutput`, `PortfolioNarrative`, `Recommendation`, `FinalResult`, `ProgressEvent`, all API DTOs
-(`api.ts`), ref rows (`TierBand`, `Category`, `RateCard`, `TierBenchmark`, `KpiBenchmark`, `RefData`) and the static
+`PortfolioPlan`, `CuratorOutput`, `PortfolioNarrative`, `Recommendation`, `FinalResult`, `ProgressEvent`, `ValueSource`
+(`'user' | 'inferred'`), all API DTOs (`api.ts`, including `AssistSection`, `AssistRequest`, `AssistResponse`), ref rows (`TierBand`, `Category`, `RateCard`, `TierBenchmark`, `KpiBenchmark`, `RefData`) and the static
 seeds `REF_SEED`, `PERSONAS_SEED`. Constants: `PIPELINE_VERSION`, `PROMPT_VERSION`, `RUBRIC_VERSION`,
 `TERMINAL_STATUSES`, `STAGE_TO_STATUS`.
+
+`CampaignInput.objective` and `nCreators` are nullable: `null` = the client left it to the agent, which resolves it in
+the brand step from LLM1's `campaignSuggestion`. What the agent chose is marked with `objectiveSource` /
+`nCreatorsSource` (`InputBrief.campaign`, `BrandProfile.campaign`, `FinalResult.brief`) plus
+`objectiveReasonTh` and `FinalResult.brief.audienceSource`. AI-written text added in the same change:
+`BrandProfile.overviewTh` / `FinalResult.brand.overviewTh` (results header) and `CuratorOutput.fitSummaryTh` /
+`Recommendation.fitSummaryTh`. All new fields default (`'user'`, `''`), so stored results from before still parse.
 
 ---
 
@@ -271,6 +278,7 @@ export async function evaluateCreator(brand: BrandProfile, d: CreatorDossier, ct
 export async function curateCreator(a: { brand: BrandProfile; dossier: CreatorDossier; ranked: RankedCreator; evaluation: KolEvaluation | null; hints: PlaybookHints; kpis: ExpectedKpis }, ctx?: AiCtx): Promise<CuratorOutput>; // LLM4
 export async function curatePortfolio(a: { brand: BrandProfile; plan: PortfolioPlan; picks: { handle: string; role: CreatorRole; whyTh: string }[] }, ctx?: AiCtx): Promise<PortfolioNarrative>;
 export async function transcribe(audio: ArrayBuffer, filename: string, contentType: string, ctx?: AiCtx): Promise<{ text: string; durationS: number | null }>;
+export async function assistForm(req: AssistRequest, personas: AudiencePersona[], ctx?: AiCtx): Promise<AssistResponse>; // form assist, fast tier, low effort
 export async function embed(texts: string[], ctx?: AiCtx): Promise<number[][]>;   // dims from OPENAI_EMBEDDING_DIMENSIONS
 export function cosine(a: number[], b: number[]): number;
 export function spotlight(id: string, type: string, text: string): string;       // <untrusted_source …> wrapper
@@ -301,6 +309,7 @@ no Vercel Workflow (no `withWorkflow`, no `workflow` package): runs are queued w
 |---|---|---|
 | `GET /health` | – | `HealthResponse` + agent-only `runner: 'upstash' \| 'inline' \| 'unavailable'`; `configured.queue` = `QSTASH_TOKEN` and both signing keys set (booleans/mode only, never values) |
 | `POST /transcribe` | edge + user | `TranscribeRequest` → `TranscribeResponse`; asset must be under `uploads/{userId}/`; rate limit |
+| `POST /assist` | edge + user | BotID for guests (checked in cvc-web); `AssistRequest` → `AssistResponse`; `rl:assist:{userId}` 20/h; 30 s budget; `400` invalid · `429` · `502 assist_failed` · `503 assist_unavailable` · `504 assist_timeout` |
 | `POST /runs` | edge + user | `RunInput` → `202 CreateRunResponse` once the run is enqueued (never waits for the pipeline); dedupe; guests get `claimSecret`; runner `unavailable` → `503 { error: { code: 'queue_not_configured', messageTh } }`; `client.trigger` throws → `503 pipeline_unavailable`; both mark the run `failed` and release the dedupe key |
 | `GET /runs/:id` | edge + owner | `RunStatusResponse` |
 | `GET /runs/:id/events?after=` | edge + owner | `RunEventsResponse` (polling) |
@@ -400,7 +409,7 @@ export const agentApi: { createRun(i: RunInputDraft): Promise<CreateRunResponse>
   events(id, after: number): Promise<RunEventsResponse>; cancel(id): Promise<void>; getResult(id): Promise<FinalResult>;
   rescore(id, body: RescoreRequest): Promise<RescoreResponse>; feedback(id, body: FeedbackRequest): Promise<void>;
   chatSession(resultId): Promise<ChatSessionResponse>; resetChat(resultId): Promise<ChatSessionResponse>;
-  transcribe(assetPathname: string): Promise<TranscribeResponse> };
+  transcribe(assetPathname: string): Promise<TranscribeResponse>; assist(req: AssistRequestInput, signal?: AbortSignal): Promise<AssistResponse> };
 export const systemApi: { personas(): Promise<PersonasResponse>; me(): Promise<MeResponse>; history(cursor?): Promise<HistoryResponse>;
   listSaved(): Promise<SavedResult[]>; saveResult(b): Promise<SavedResult>; deleteSaved(id): Promise<void>; claim(items): Promise<ClaimResponse> };
 
@@ -416,11 +425,12 @@ export const localStore: { listRuns(): Promise<LocalRun[]>; putRun(r: LocalRun):
   getSavedResult(resultId: string): Promise<FinalResult | null>; removeSavedResult(resultId: string): Promise<void> };
 
 // components/ui/* — primitives (props are the contract)
-Button({ variant?: 'primary' | 'secondary' | 'tertiary' | 'danger', size?: 'sm' | 'md', loading?, ...button props })
-ButtonLink({ href, variant?, size?, children })        Badge({ tone?: 'neutral' | 'accent' | 'positive' | 'warning' | 'negative', children })
+Button({ variant?: 'primary' | 'secondary' | 'tertiary' | 'danger' | 'ai', size?: 'sm' | 'md' | 'icon', loading?, ...button props })
+ButtonLink({ href, variant?, size?, children })        Badge({ tone?: 'neutral' | 'accent' | 'info' | 'positive' | 'warning' | 'negative', children })
 Card({ className?, children })   SectionHeading({ title, action? })   PageHeader({ title, description?, actions? })
 CreatorAvatar({ src: string | null, handle: string, size?: 32 | 40 | 64 })   Skeleton({ className })
 EmptyState({ title, action? })   ErrorBlock({ messageTh, onRetry? })   DemoBanner()
 Tabs({ items: { id: string; label: string }[], value: string, onChange(id) })   Sheet({ open, onClose, title?, children, width? })
-Tooltip({ content, children })   Field({ label, hint?, error?, children })   Input / Textarea / Select (forwardRef, native props)
+Tooltip({ content, children, side?: 'top' | 'right', disabled?, repeatsLabel?, className? })   Field({ label, hint?, error?, children })
+AiSparkleIcon({ size?, tone?: 'gradient' | 'current', className? })   Disclosure({ title, children, preview?, meta?, action?, variant?: 'section' | 'card' | 'inline', defaultOpen?, open?, onOpenChange?, … })   Input / Textarea / Select (forwardRef, native props)
 ```

@@ -1,5 +1,6 @@
 import { Hono } from 'hono';
 import { handleError, notFoundResponse, type AppEnv } from './http';
+import { assistRoutes } from './routes/assist';
 import { chatRoutes } from './routes/chat';
 import { cronRoutes } from './routes/cron';
 import { healthRoutes } from './routes/health';
@@ -14,6 +15,7 @@ export function createApp(): Hono<AppEnv> {
 
   app.route('/', healthRoutes());
   app.route('/', transcribeRoutes());
+  app.route('/', assistRoutes());
   app.route('/', runRoutes());
   app.route('/', resultRoutes());
   app.route('/', chatRoutes());

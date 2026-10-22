@@ -84,6 +84,10 @@ export const LlmBrandProfile = z.object({
     themes: strs,
     fbEngagement: z.object({ medianER: z.number().nullable(), postsPerWeek: z.number().nullable() }),
   }),
+  // The campaign LLM1 recommends and the results-header overview; code applies the suggestion only to the settings the
+  // client left to the agent (mapLlmBrandProfile). campaignSuggestion is generated before the overview that explains it.
+  campaignSuggestion: z.object({ objective: Objective, nCreators: z.number().int(), reasonTh: str }),
+  overviewTh: str,
   campaign: z.object({ kpis: strs, formats: strs }),
   creatorRequirements: z.object({
     mustCategories: strs,
@@ -138,6 +142,8 @@ export type LlmEvaluation = z.infer<typeof LlmEvaluation>;
 export const LlmCuratorOutput = z.object({
   whyMatchTh: z.array(z.object({ text: str, evidenceRefs: strs })),
   risksTh: strs,
+  // Paragraph shown in the creators table and the side sheet; written after the reasons and risks it summarizes.
+  fitSummaryTh: str,
   storyline: z.object({
     conceptTh: str,
     hookTh: str,
@@ -167,3 +173,16 @@ export const LlmPortfolioNarrative = z.object({
   nextStepsTh: strs,
 });
 export type LlmPortfolioNarrative = z.infer<typeof LlmPortfolioNarrative>;
+
+// Form assist (the prompt bar of the new-analysis form): one schema per form section.
+export const LlmAudienceAssist = z.object({ personaIds: strs, audienceNotes: str, noteTh: str });
+export type LlmAudienceAssist = z.infer<typeof LlmAudienceAssist>;
+
+export const LlmCampaignAssist = z.object({
+  objective: Objective,
+  budgetMinTHB: z.number().nullable(),
+  budgetMaxTHB: z.number().nullable(),
+  nCreators: z.number().int(),
+  noteTh: str,
+});
+export type LlmCampaignAssist = z.infer<typeof LlmCampaignAssist>;

@@ -204,6 +204,7 @@ export function recommendation(i: number, overrides: Partial<Recommendation> = {
     narrativeStatus: 'ready',
     whyMatchTh: [],
     risksTh: ['ข้อมูลย้อนหลังน้อย'],
+    fitSummaryTh: '',
     storyline: null,
     pitchAnglesTh: [],
     estFeeTHB: { min: 15_000 + i * 15_000, max: 30_000 + i * 40_000 },

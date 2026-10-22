@@ -55,6 +55,7 @@ function recSummary(r: Recommendation): Record<string, unknown> {
     audienceEstimate: r.audience,
     rubric: r.rubric.map((x) => ({ criterion: x.criterion, score: x.score, noteTh: x.noteTh })),
     playbook: { role: r.playbook.role, formats: r.playbook.recommendedFormats, collaborationModel: r.playbook.collaborationModel, postingWindow: r.playbook.postingWindow },
+    fitSummaryTh: r.fitSummaryTh,
     whyMatchTh: r.whyMatchTh.map((w) => w.text),
     risksTh: r.risksTh,
     suspectedInjection: r.suspectedInjection,

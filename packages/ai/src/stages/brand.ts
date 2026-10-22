@@ -34,10 +34,17 @@ const genderKey = (k: string): string => {
   return t;
 };
 
+/** LLM1's suggested creator count, kept inside what the form allows. */
+function suggestedCreators(n: number): number {
+  return Number.isFinite(n) ? Math.round(clamp(n, 1, 10)) : 5;
+}
+
 /**
- * Maps the strict LLM shape to BrandProfile. Code owns name/URLs/campaign/scoring preset/minors; ids are checked
- * against the category list; empty criteria or segments fall back to the deterministic stub so the profile stays valid.
- * Web evidence keeps any http(s) URL here; researchBrand() drops URLs that web_search did not return.
+ * Maps the strict LLM shape to BrandProfile. Code owns name/URLs/campaign/scoring preset/minors; the campaign keeps
+ * the client's values and takes LLM1's campaignSuggestion only for the objective / creator count the client left to
+ * the agent. Ids are checked against the category list; empty criteria or segments fall back to the deterministic stub
+ * so the profile stays valid. Web evidence keeps any http(s) URL here; researchBrand() drops URLs that web_search did
+ * not return.
  */
 export function mapLlmBrandProfile(raw: LlmBrandProfile, a: ResearchBrandArgs): BrandProfile {
   const { brief } = a;
@@ -91,6 +98,11 @@ export function mapLlmBrandProfile(raw: LlmBrandProfile, a: ResearchBrandArgs): 
   }));
   const segments = segmentsMapped.length ? segmentsMapped : stubProfile().audience.segments;
 
+  const suggestion = raw.campaignSuggestion;
+  const objectiveInferred = brief.campaign.objectiveSource === 'inferred';
+  const nCreatorsInferred = brief.campaign.nCreatorsSource === 'inferred';
+  const objective = objectiveInferred ? suggestion.objective : brief.campaign.objective;
+
   return {
     schemaVersion: '1.0',
     brand: {
@@ -123,6 +135,7 @@ export function mapLlmBrandProfile(raw: LlmBrandProfile, a: ResearchBrandArgs): 
       visualStyle: uniqText(raw.brand.visualStyle).slice(0, 8),
       regulatedCategory: raw.brand.regulatedCategory,
     },
+    overviewTh: truncate(raw.overviewTh, 900),
     audience: { segments, source: raw.audience.source, confidence: clamp(raw.audience.confidence, 0, 1) },
     contentStyle: {
       formats: uniqText(raw.contentStyle.formats).slice(0, 6),
@@ -133,12 +146,15 @@ export function mapLlmBrandProfile(raw: LlmBrandProfile, a: ResearchBrandArgs): 
         postsPerWeek: raw.contentStyle.fbEngagement.postsPerWeek != null && Number.isFinite(raw.contentStyle.fbEngagement.postsPerWeek) ? raw.contentStyle.fbEngagement.postsPerWeek : null,
       },
     },
-    // Campaign facts come from the brief (code), only KPI names and formats from the model.
+    // Campaign facts come from the brief (code); the model adds KPI names, formats and the values left to the agent.
     campaign: {
-      objective: brief.campaign.objective,
+      objective,
+      objectiveSource: objectiveInferred ? 'inferred' : 'user',
+      objectiveReasonTh: objectiveInferred ? truncate(suggestion.reasonTh, 300) : '',
       kpis: uniqText(raw.campaign.kpis).slice(0, 6),
       budgetTHB: brief.campaign.budgetTHB,
-      nCreators: brief.campaign.nCreators,
+      nCreators: nCreatorsInferred ? suggestedCreators(suggestion.nCreators) : brief.campaign.nCreators,
+      nCreatorsSource: nCreatorsInferred ? 'inferred' : 'user',
       preferredTiers: brief.campaign.preferredTiers,
       formats: uniqText(raw.campaign.formats).slice(0, 4),
     },
@@ -168,7 +184,7 @@ export function mapLlmBrandProfile(raw: LlmBrandProfile, a: ResearchBrandArgs): 
       keywordsTh: uniqText(raw.matchingQueries.keywordsTh).slice(0, 10),
       keywordsEn: uniqText(raw.matchingQueries.keywordsEn).slice(0, 8),
     },
-    scoringPreset: brief.campaign.objective,
+    scoringPreset: objective,
     evidence,
     sourcesUnavailable: uniqText([...unavailableSources(brief, a.evidence), ...raw.sourcesUnavailable]).slice(0, 10),
     unknowns: uniqText(raw.unknowns).slice(0, 10),

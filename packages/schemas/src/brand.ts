@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { BrandSafetyLevel, ClientSource, MinMax, Objective, Tier } from './common';
+import { BrandSafetyLevel, ClientSource, MinMax, Objective, Tier, ValueSource } from './common';
 
 /** Quarantined summarizer output per client source (§4.4 step B). Stored in analysis.client_snapshots.evidence_card. */
 export const EvidenceCard = z.object({
@@ -63,6 +63,8 @@ export const BrandProfile = z.object({
     visualStyle: z.array(z.string()),
     regulatedCategory: z.enum(['none', 'cosmetics', 'supplement', 'alcohol', 'finance', 'medical']),
   }),
+  /** 3-4 Thai sentences for the results header: what the brand sells, who it serves, its content style and tone. */
+  overviewTh: z.string().default(''),
   audience: z.object({
     segments: z.array(AudienceSegment).min(1),
     source: z.enum(['user_selected', 'inferred', 'mixed']),
@@ -76,9 +78,13 @@ export const BrandProfile = z.object({
   }),
   campaign: z.object({
     objective: Objective,
+    objectiveSource: ValueSource.default('user'),
+    /** why LLM1 suggested the objective; empty when the client chose it */
+    objectiveReasonTh: z.string().default(''),
     kpis: z.array(z.string()),
     budgetTHB: MinMax.nullable(),
     nCreators: z.number().int(),
+    nCreatorsSource: ValueSource.default('user'),
     preferredTiers: z.array(Tier),
     formats: z.array(z.string()),
   }),

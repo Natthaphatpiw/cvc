@@ -111,6 +111,36 @@ function risks(a: CurateCreatorArgs): Risk[] {
   return out.slice(0, 4);
 }
 
+function topAges(dist: Record<string, number> | null | undefined): string {
+  return Object.entries(dist ?? {})
+    .sort((x, y) => y[1] - x[1])
+    .slice(0, 2)
+    .map(([k]) => k)
+    .join(', ');
+}
+
+/** Fit paragraph: content match, audience overlap with the brand's segments, performance, then the main caveat. */
+function fitSummary(a: CurateCreatorArgs, label: string, mainRisk: string | undefined): string {
+  const { dossier: d, brand } = a;
+  const m = d.metrics;
+  const segments = brand.audience.segments.slice(0, 2).map((s) => s.label);
+  const customers = segments.length ? `กลุ่มลูกค้า ${segments.join(' และ ')}` : 'กลุ่มลูกค้าของแบรนด์';
+  const ages = topAges(d.audience?.ageDist);
+  const female = d.audience?.genderDist ? (d.audience.genderDist.female ?? d.audience.genderDist.f ?? null) : null;
+  const gender = female === null ? '' : female >= 0.6 ? ' ส่วนใหญ่เป็นผู้หญิง' : female <= 0.4 ? ' ส่วนใหญ่เป็นผู้ชาย' : ' ทั้งผู้หญิงและผู้ชาย';
+  const relevance = a.evaluation?.rubric.find((x) => x.criterion === 'content_product_relevance');
+  return [
+    `@${d.profile.handle} ทำคอนเทนต์สาย${label}ที่${relevance && relevance.score >= 2 ? 'ตรง' : 'ใกล้เคียง'}กับสินค้าของ ${brand.brand.name}`,
+    ages
+      ? `ผู้ชมส่วนใหญ่อายุ ${ages} ปี${gender} (ค่าประมาณ) จึงใกล้เคียงกับ${customers}`
+      : `ยังไม่มีข้อมูลผู้ชมที่ชัดเจน จึงประเมินความเข้ากับ${customers}จากเนื้อหาเป็นหลัก`,
+    m.medianViews != null ? `ยอดวิวกลางต่อคลิป ${fmtNumber(m.medianViews)} วิว และอัตราการมีส่วนร่วม ${fmtPct(m.erViewsMedian)} ช่วยให้ข้อความของแบรนด์ไปถึงผู้ชมได้จริง` : '',
+    mainRisk ? `ข้อควรระวังหลักคือ${mainRisk}` : '',
+  ]
+    .filter((x) => x.length > 0)
+    .join(' ');
+}
+
 /** Deterministic Thai narrative built only from computed numbers and the inputs. */
 export function buildStubCuratorOutput(a: CurateCreatorArgs): CuratorOutput {
   const { dossier: d, ranked: r, kpis: k, brand } = a;
@@ -149,6 +179,7 @@ export function buildStubCuratorOutput(a: CurateCreatorArgs): CuratorOutput {
     creatorId: d.creatorId,
     whyMatchTh: why.slice(0, 5),
     risksTh: riskList.map((x) => x.riskTh),
+    fitSummaryTh: fitSummary(a, label.th, riskList[0]?.riskTh),
     storyline: {
       conceptTh: `@${handle} เล่าประสบการณ์ใช้ ${product} ในสไตล์ของตัวเอง โดยเน้น${brand.matchingQueries.criteria[0]?.textTh ?? `ประเด็นที่ผู้ชมสาย${label.th}สนใจ`}`,
       hookTh: 'เปิดคลิปด้วยปัญหาที่ผู้ชมเจอบ่อย แล้วหยิบสินค้าขึ้นมาให้เห็นภายใน 3 วินาทีแรก',

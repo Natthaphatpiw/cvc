@@ -1,7 +1,8 @@
 import { BrandProfile, type AudiencePersona, type Category, type EvidenceCard, type InputBrief, type Objective } from '@cvc/schemas';
 import { categoryKeywords, followerRangeForTiers, guessCategory, regulatedFor } from '../categories';
-import { evidenceRef } from '../prompts/brand';
-import { clamp, tiktokHandleFromUrl, truncate, uniqText } from '../text';
+import { OBJECTIVE_LABEL_TH } from '../format';
+import { audienceInferred, evidenceRef } from '../prompts/brand';
+import { clamp, hasKeyword, tiktokHandleFromUrl, truncate, uniqText } from '../text';
 
 export type ResearchBrandArgs = {
   brief: InputBrief;
@@ -69,6 +70,71 @@ export function brandSignalTexts(brief: InputBrief, evidence: EvidenceCard[]): s
   ].filter(Boolean);
 }
 
+type CampaignSuggestion = { objective: Objective; nCreators: number; reasonTh: string };
+
+/** Objective cues in what the client and the evidence said, checked in this order. */
+const SUGGESTION_CUES: { objective: Objective; keywords: string[]; reasonTh: string }[] = [
+  { objective: 'tiktok_shop', keywords: ['tiktok shop', 'ตะกร้า', 'ไลฟ์ขาย'], reasonTh: 'ข้อมูลของแบรนด์พูดถึงการขายผ่าน TikTok Shop หรือการไลฟ์ขายของ' },
+  { objective: 'launch', keywords: ['เปิดตัว', 'สินค้าใหม่', 'launch'], reasonTh: 'ข้อมูลของแบรนด์พูดถึงสินค้าใหม่หรือการเปิดตัว' },
+  { objective: 'ugc', keywords: ['ugc'], reasonTh: 'แบรนด์ต้องการคอนเทนต์ไปใช้ต่อในช่องทางของตัวเอง' },
+  { objective: 'brand_building', keywords: ['ภาพลักษณ์', 'ระยะยาว'], reasonTh: 'ข้อมูลของแบรนด์เน้นการสร้างภาพลักษณ์ในระยะยาว' },
+];
+
+/** Deterministic stand-in for LLM1's campaignSuggestion: keyword cues, else conversion when products are known. */
+function stubCampaignSuggestion(brief: InputBrief, evidence: EvidenceCard[], hasProducts: boolean): CampaignSuggestion {
+  const text = brandSignalTexts(brief, evidence).join('\n').normalize('NFC').toLowerCase();
+  const cue = SUGGESTION_CUES.find((c) => c.keywords.some((k) => hasKeyword(text, k)));
+  if (cue) return { objective: cue.objective, nCreators: 5, reasonTh: cue.reasonTh };
+  return hasProducts
+    ? { objective: 'conversion', nCreators: 5, reasonTh: 'แบรนด์มีสินค้าที่ชัดเจนพร้อมขาย จึงเหมาะกับการกระตุ้นยอดขาย' }
+    : { objective: 'awareness', nCreators: 5, reasonTh: 'ยังพบข้อมูลสินค้าไม่มาก จึงควรเริ่มจากการสร้างการรับรู้แบรนด์' };
+}
+
+/** Catalog personas whose category hints match the guessed category: the stub's inferred segments. */
+function catalogMatches(personas: AudiencePersona[], category: Category): AudiencePersona[] {
+  const ids = new Set([category.id, category.parentId].filter((x): x is string => x != null));
+  return personas.filter((p) => p.categoryHints.some((h) => ids.has(h))).slice(0, 2);
+}
+
+const PRICE_TH: Record<BrandProfile['brand']['pricePositioning'], string> = {
+  mass: 'ราคาเข้าถึงง่าย',
+  masstige: 'ราคาระดับกลางค่อนบน',
+  premium: 'ราคาระดับพรีเมียม',
+  luxury: 'ราคาระดับหรู',
+};
+
+/** Deterministic overview (at most 4 sentences) from what the stub profile holds; says so when evidence is missing. */
+function stubOverviewTh(a: {
+  name: string;
+  categoryTh: string;
+  products: string[];
+  price: BrandProfile['brand']['pricePositioning'] | null;
+  tone: string[];
+  pillars: string[];
+  segments: string[];
+  audienceInferred: boolean;
+  inferredObjective: CampaignSuggestion | null;
+  evidenceCount: number;
+}): string {
+  const products = a.products.length ? ` สินค้าที่พบ ได้แก่ ${a.products.slice(0, 3).join(', ')}` : '';
+  const price = a.price ? ` วางตำแหน่ง${PRICE_TH[a.price]}` : '';
+  const audience = a.audienceInferred
+    ? a.segments.length
+      ? `จากข้อมูลที่มี ระบบวิเคราะห์ว่ากลุ่มลูกค้าหลักน่าจะเป็น ${a.segments.join(' และ ')}`
+      : 'ยังระบุกลุ่มลูกค้าหลักได้ไม่ชัดเจนจากข้อมูลที่มี'
+    : `กลุ่มลูกค้าหลักคือ ${a.segments.join(' และ ')}`;
+  return [
+    `${a.name} เป็นแบรนด์หมวด${a.categoryTh}${products}${price}`,
+    audience,
+    a.tone.length ? `โทนการสื่อสารของแบรนด์${a.tone.slice(0, 3).join(' ')} เนื้อหาเน้นเรื่อง${a.pillars.slice(0, 2).join(' ')}` : '',
+    a.inferredObjective ? `ระบบเลือกเป้าหมายแคมเปญ ${OBJECTIVE_LABEL_TH[a.inferredObjective.objective]} ให้ เพราะ${a.inferredObjective.reasonTh}` : '',
+    a.evidenceCount === 0 ? 'ยังไม่มีข้อมูลจากเพจหรือเว็บไซต์ของแบรนด์ สรุปนี้จึงอ้างอิงจากชื่อแบรนด์และข้อมูลที่กรอกเท่านั้น' : '',
+  ]
+    .filter((x) => x.length > 0)
+    .slice(0, 4)
+    .join(' ');
+}
+
 function genericSegment(label: string): BrandProfile['audience']['segments'][number] {
   return {
     label,
@@ -87,7 +153,6 @@ export function buildStubBrandProfile(a: ResearchBrandArgs): BrandProfile {
   const personas = selectedPersonas(brief, a.personas);
   const category = guessCategory(brandSignalTexts(brief, evidence), a.categories, personas);
   const parentId = category.parentId;
-  const objective = brief.campaign.objective;
   const regulated = regulatedFor(category.id);
 
   const products = uniqText(evidence.flatMap((e) => e.products.map((p) => p.name)))
@@ -108,7 +173,15 @@ export function buildStubBrandProfile(a: ResearchBrandArgs): BrandProfile {
     ? ([...tiers].sort((x, y) => tiers.filter((t) => t === y).length - tiers.filter((t) => t === x).length)[0] ?? 'mass')
     : 'mass';
 
-  const segments: BrandProfile['audience']['segments'] = personas.map((p) => ({
+  // Settings the client left to the agent take the suggestion, as mapLlmBrandProfile does with LLM1's.
+  const suggestion = stubCampaignSuggestion(brief, evidence, products.length > 0);
+  const objectiveInferred = brief.campaign.objectiveSource === 'inferred';
+  const nCreatorsInferred = brief.campaign.nCreatorsSource === 'inferred';
+  const objective = objectiveInferred ? suggestion.objective : brief.campaign.objective;
+
+  const noAudience = audienceInferred(brief);
+  const inferredPersonas = noAudience ? catalogMatches(a.personas, category) : [];
+  const segments: BrandProfile['audience']['segments'] = [...personas, ...inferredPersonas].map((p) => ({
     label: p.labelTh,
     ageDist: p.ageDist,
     genderDist: p.genderDist,
@@ -155,6 +228,18 @@ export function buildStubBrandProfile(a: ResearchBrandArgs): BrandProfile {
 
   const followers = followerRangeForTiers(brief.campaign.preferredTiers);
   const tone = uniqText(evidence.flatMap((e) => e.tone)).slice(0, 5);
+  const overviewTh = stubOverviewTh({
+    name: brief.company.name,
+    categoryTh: category.labelTh,
+    products: products.map((p) => p.name),
+    price: tiers.length ? pricePositioning : null,
+    tone,
+    pillars: [category.labelTh],
+    segments: noAudience ? inferredPersonas.map((p) => p.labelTh) : segments.map((s) => s.label),
+    audienceInferred: noAudience,
+    inferredObjective: objectiveInferred ? suggestion : null,
+    evidenceCount: evidence.length,
+  });
 
   const profile: BrandProfile = {
     schemaVersion: '1.0',
@@ -173,13 +258,17 @@ export function buildStubBrandProfile(a: ResearchBrandArgs): BrandProfile {
       visualStyle: [],
       regulatedCategory: regulated,
     },
+    overviewTh: truncate(overviewTh, 900),
     audience: { segments, source: audienceSource, confidence: personas.length ? 0.6 : 0.3 },
     contentStyle: { formats: ['short_video'], hooks: [], themes: [category.labelTh], fbEngagement: { medianER: null, postsPerWeek: null } },
     campaign: {
       objective,
+      objectiveSource: objectiveInferred ? 'inferred' : 'user',
+      objectiveReasonTh: objectiveInferred ? suggestion.reasonTh : '',
       kpis: KPIS[objective],
       budgetTHB: brief.campaign.budgetTHB,
-      nCreators: brief.campaign.nCreators,
+      nCreators: nCreatorsInferred ? suggestion.nCreators : brief.campaign.nCreators,
+      nCreatorsSource: nCreatorsInferred ? 'inferred' : 'user',
       preferredTiers: brief.campaign.preferredTiers,
       formats: FORMATS[objective],
     },

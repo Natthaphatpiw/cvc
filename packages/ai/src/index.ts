@@ -26,6 +26,8 @@ export {
   type CurateCreatorArgs,
   type CuratePortfolioArgs,
 } from './stages/curate';
+// Form assist (the new-analysis form's prompt bar)
+export { assistForm } from './stages/assist';
 
 export { embed, cosine } from './embed';
 export { transcribe } from './transcribe';

@@ -69,7 +69,14 @@ export async function generateStructured<L, D>(call: StructuredCall<L, D>): Prom
         '\nReturn the complete corrected JSON object that follows the schema and every rule in the instructions.',
     },
   ];
-  const second = await attempt(call, repairMessages, sourceUrls);
+  let second: Attempt<D>;
+  try {
+    second = await attempt(call, repairMessages, sourceUrls);
+  } catch (err) {
+    // A schema-valid first answer survives a repair that times out or fails; callers sanitize leftover issues.
+    if (first.ok) return { value: first.value, issues: first.issues, sourceUrls: [...sourceUrls] };
+    throw err;
+  }
   if (second.ok) return { value: second.value, issues: second.issues, sourceUrls: [...sourceUrls] };
   if (first.ok) return { value: first.value, issues: first.issues, sourceUrls: [...sourceUrls] };
   throw new AiOutputError(call.stage, second.issues);

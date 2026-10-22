@@ -11,6 +11,7 @@ import {
   type ProgressEventInput,
   type RefData,
   type RunInput,
+  type ValueSource,
 } from '@cvc/schemas';
 import { isThaiText, normalizeHandle } from '@cvc/thai';
 import { WorkflowNonRetryableError } from '@upstash/workflow';
@@ -197,7 +198,7 @@ export function briefFromInput(input: RunInput): InputBrief {
   if (!input.websiteUrl) missing.push('websiteUrl');
   if (!input.facebookUrl) missing.push('facebookUrl');
   if (!input.tiktokUrl) missing.push('tiktokUrl');
-  if (input.personaIds.length === 0 && !input.audienceNotes) missing.push('targetAudience');
+  if (input.personaIds.length === 0 && !input.audienceNotes && !voiceText) missing.push('targetAudience');
   if (!input.campaign.budgetTHB) missing.push('budgetTHB');
   return {
     company: { name: input.companyName, nameTh: isThaiText(input.companyName) ? input.companyName : null, aliases: [] },
@@ -210,10 +211,13 @@ export function briefFromInput(input: RunInput): InputBrief {
       others: [],
     },
     targetAudience: { personaIds: input.personaIds, freeText: input.audienceNotes, fromVoice: voiceText, fromImages: null },
+    // Same placeholders as buildBaseBrief for values the client left to the agent (resolved in the brand step).
     campaign: {
-      objective: input.campaign.objective,
+      objective: input.campaign.objective ?? 'conversion',
+      objectiveSource: input.campaign.objective == null ? 'inferred' : 'user',
       budgetTHB: input.campaign.budgetTHB,
-      nCreators: input.campaign.nCreators,
+      nCreators: input.campaign.nCreators ?? 5,
+      nCreatorsSource: input.campaign.nCreators == null ? 'inferred' : 'user',
       preferredTiers: input.campaign.preferredTiers,
     },
     constraints: {
@@ -240,12 +244,19 @@ export async function loadBrandOrFail(run: RunRecord): Promise<BrandProfile> {
 }
 
 /**
- * Campaign settings of the normalized brief: LLM0 only fills values the form left at their defaults (mergeBriefHints),
- * so explicit form values still win, and every step sees the same campaign.
+ * Campaign settings of the normalized brief: explicit form values win, LLM0 only fills values the client left to the
+ * agent (mergeBriefHints), and the brand step writes the values it inferred back, so every later step sees the same
+ * campaign.
  */
 export function campaignOf(run: RunRecord) {
   const c = briefOf(run).campaign;
   return { objective: c.objective, budgetTHB: c.budgetTHB, nCreators: c.nCreators, preferredTiers: c.preferredTiers };
+}
+
+/** The client gave no audience (no persona and no audience text from notes, voice or screenshots): LLM1 inferred it. */
+export function audienceSourceOf(brief: InputBrief): ValueSource {
+  const t = brief.targetAudience;
+  return t.personaIds.length === 0 && !t.freeText && !t.fromVoice && !t.fromImages ? 'inferred' : 'user';
 }
 
 const uniq = (xs: readonly string[]): string[] => [...new Set(xs.filter((x) => x.trim().length > 0))];

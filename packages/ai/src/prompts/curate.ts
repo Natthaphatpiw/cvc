@@ -21,6 +21,7 @@ export const CURATE_CREATOR_INSTRUCTIONS = `You are LLM4, the curator and consul
 Write in Thai, concise and concrete, like a senior agency consultant:
 - whyMatchTh: 3-5 reasons this creator fits the brand and the campaign objective. Each reason cites evidenceRefs: brand evidence refs (E1, E2, ...) and/or video ids from the video list that support it. Use an empty list only when the reason rests on computed metrics alone.
 - risksTh: 1-4 honest risks (data gaps, sponsored-post load, audience mismatch, brand-safety notes, low confidence of estimates).
+- fitSummaryTh: 3-4 short Thai sentences, friendly and plain, that the client reads first: why this creator fits this brand AND its target customers (how the creator's audience signals overlap the brand's segments, how the content style and tone suit the products, how the creator persuades), then the main caveat. Numbers only as placeholders, like every other field.
 - storyline: one campaign idea for this creator. conceptTh (the idea), hookTh (what happens in the first 3 seconds), format (choose from the recommended formats when possible: in_feed, live, affiliate, series), ctaTh (fits the objective), sampleCaptionTh (a short caption in the creator's voice that ends with #โฆษณา), disclosure "#โฆษณา".
 - pitchAnglesTh: 2-3 ways to pitch the collaboration to the creator.
 - topVideoNotes: 2-3 video ids from the video list with one Thai sentence each on why the video is a good reference for the brief.
@@ -62,9 +63,18 @@ export function buildCurateCreatorUserContent(a: CuratorPromptInput, placeholder
     regulatedCategory: a.brand.brand.regulatedCategory,
     objective: a.brand.campaign.objective,
     criteria: a.brand.matchingQueries.criteria.map((c) => c.textTh),
-    audience: a.brand.audience.segments.map((s) => s.label),
+    audienceSource: a.brand.audience.source,
+    audience: a.brand.audience.segments.slice(0, 4).map((s) => ({
+      label: s.label,
+      interests: s.interests.slice(0, 5),
+      painPoints: s.painPoints.slice(0, 3),
+      purchaseDrivers: s.purchaseDrivers.slice(0, 3),
+    })),
     evidence: a.brand.evidence.map((e) => ({ ref: e.ref, claim: e.claim })),
   };
+  // Shares and age bands reach the model only as placeholders (creatorPlaceholders), never as raw numbers.
+  const aud = a.dossier.audience;
+  const creatorAudience = aud ? { source: aud.source, confidence: aud.confidence, commentSampleSize: aud.sampleSize } : null;
   const plan = {
     role: a.hints.role,
     recommendedFormats: a.hints.recommendedFormats,
@@ -92,6 +102,8 @@ export function buildCurateCreatorUserContent(a: CuratorPromptInput, placeholder
 
   return [
     `Creator handle: @${a.dossier.profile.handle}`,
+    `Creator bio:\n${spotlight('bio', 'creator_bio', truncate(a.dossier.profile.bio ?? '', 300))}`,
+    `Creator audience signals (estimates; age bands and shares are given as placeholders below):\n${creatorAudience ? JSON.stringify(creatorAudience) : 'not available'}`,
     `Brand (code digest):\n${JSON.stringify(brand)}`,
     `Plan decided by code:\n${JSON.stringify(plan)}`,
     `Evaluation by LLM2b:\n${evaluation ? spotlight('evaluation', 'model_evaluation', JSON.stringify(evaluation)) : 'not available'}`,

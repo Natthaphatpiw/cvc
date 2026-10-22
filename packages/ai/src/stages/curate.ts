@@ -15,6 +15,16 @@ const DISCLOSURE = '#โฆษณา';
 
 type Placeholders = { values: Record<string, string>; docs: Record<string, string> };
 
+/** The n keys with the largest shares, for example '25-34, 18-24'. */
+function topKeys(dist: Record<string, number> | null | undefined, n = 2): string {
+  if (!dist) return '–';
+  const keys = Object.entries(dist)
+    .sort((x, y) => y[1] - x[1])
+    .slice(0, n)
+    .map(([key]) => key);
+  return keys.length ? keys.join(', ') : '–';
+}
+
 export function creatorPlaceholders(a: CurateCreatorArgs): Placeholders {
   const m = a.dossier.metrics;
   const k = a.kpis;
@@ -46,6 +56,17 @@ export function creatorPlaceholders(a: CurateCreatorArgs): Placeholders {
     entries.push(['expected_orders_p50', fmtNumber(k.conversion.orders.p50), 'expected orders per post (estimate)']);
     entries.push(['expected_clicks_p50', fmtNumber(k.conversion.clicks.p50), 'expected clicks per post (estimate)']);
   }
+  // Audience overlap for fitSummaryTh: age bands and shares would otherwise be raw numbers in the text.
+  const aud = a.dossier.audience;
+  if (aud) {
+    const female = aud.genderDist ? (aud.genderDist.female ?? aud.genderDist.f ?? null) : null;
+    entries.push(['audience_age_top', topKeys(aud.ageDist), "most common age bands of the creator's viewers (estimate)"]);
+    entries.push(['audience_female_share', fmtPct(female, 0), 'share of female viewers (estimate)']);
+    entries.push(['audience_thai_share', fmtPct(aud.thaiShare, 0), 'share of Thai viewers (estimate)']);
+    if (aud.commentSignals) entries.push(['audience_buy_intent', fmtPct(aud.commentSignals.buyIntentShare, 0), 'share of comments that show buying intent (estimate)']);
+  }
+  const segment = a.brand.audience.segments[0];
+  if (segment) entries.push(['brand_age_top', topKeys(segment.ageDist), "main age bands of the brand's first target segment"]);
   return { values: Object.fromEntries(entries.map(([key, v]) => [key, v])), docs: Object.fromEntries(entries.map(([key, , d]) => [key, d])) };
 }
 
@@ -69,15 +90,20 @@ export function fillMetricPlaceholders(text: string, values: Record<string, stri
   return text.replace(PLACEHOLDER_RE, (_m, name: string) => values[name.toLowerCase()] ?? '–');
 }
 
-/** Rule violations in model text: raw numbers outside placeholders and unknown placeholder names. */
-export function narrativeIssues(texts: { path: string; text: string }[], values: Record<string, string>): string[] {
+/**
+ * Rule violations in model text: raw numbers outside placeholders and unknown placeholder names. `literals` are names
+ * the text may quote verbatim (segment labels such as วัยเกษียณ/50+, the @handle); their digits are not metrics.
+ */
+export function narrativeIssues(texts: { path: string; text: string }[], values: Record<string, string>, literals: string[] = []): string[] {
   const issues: string[] = [];
   for (const { path, text } of texts) {
     for (const m of text.matchAll(PLACEHOLDER_RE)) {
       const name = (m[1] ?? '').toLowerCase();
       if (!(name in values)) issues.push(`${path}: unknown placeholder {{metric:${name}}}`);
     }
-    const raw = text.replace(PLACEHOLDER_RE, ' ').match(RAW_NUMBER_RE);
+    let scrubbed = text.replace(PLACEHOLDER_RE, ' ');
+    for (const l of literals) if (l) scrubbed = scrubbed.split(l).join(' ');
+    const raw = scrubbed.match(RAW_NUMBER_RE);
     if (raw?.length) issues.push(`${path}: contains raw numbers (${raw.slice(0, 3).join(', ')}); use placeholders instead`);
   }
   return issues;
@@ -88,6 +114,7 @@ function curatorTexts(o: LlmCuratorOutput | CuratorOutput): { path: string; text
   return [
     ...o.whyMatchTh.map((w, i) => ({ path: `whyMatchTh.${i}`, text: w.text })),
     ...o.risksTh.map((t, i) => ({ path: `risksTh.${i}`, text: t })),
+    { path: 'fitSummaryTh', text: o.fitSummaryTh },
     { path: 'storyline.conceptTh', text: o.storyline.conceptTh },
     { path: 'storyline.ctaTh', text: o.storyline.ctaTh },
     ...o.pitchAnglesTh.map((t, i) => ({ path: `pitchAnglesTh.${i}`, text: t })),
@@ -116,6 +143,7 @@ export function mapCuratorOutput(raw: LlmCuratorOutput, a: CurateCreatorArgs, va
     creatorId: a.dossier.creatorId,
     whyMatchTh: raw.whyMatchTh.slice(0, 5).map((w) => ({ text: fill(w.text), evidenceRefs: uniqText(w.evidenceRefs.filter((r) => allowedRefs.has(r.trim())).map((r) => r.trim())) })),
     risksTh: raw.risksTh.slice(0, 5).map((t) => fill(t)),
+    fitSummaryTh: fill(raw.fitSummaryTh, 900),
     storyline: {
       conceptTh: fill(raw.storyline.conceptTh),
       hookTh: fill(raw.storyline.hookTh, 300),
@@ -156,7 +184,8 @@ export async function curateCreator(a: CurateCreatorArgs, ctx?: AiCtx): Promise<
       return mapCuratorOutput(raw, a, values);
     },
     domainSchema: CuratorOutput,
-    check: () => (lastRaw ? narrativeIssues(curatorTexts(lastRaw), values) : []),
+    check: () =>
+      lastRaw ? narrativeIssues(curatorTexts(lastRaw), values, [...a.brand.audience.segments.map((s) => s.label), `@${a.dossier.profile.handle}`]) : [],
     maxOutputTokens: 10_000,
     ctx,
   });

@@ -7,3 +7,4 @@ export * from './injection';
 export * from './evaluate';
 export * from './curate';
 export * from './chat';
+export * from './assist';
