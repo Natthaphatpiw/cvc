@@ -29,13 +29,21 @@ function payloadRunId(payload: unknown): string | null {
  * run is then cancelled through context.cancel(): QStash records it as cancelled, without the failure function or DLQ.
  * Any other error propagates unchanged (non-retryable ones fail the run at once, others are retried by QStash).
  */
-function upstashStep(context: WorkflowContext<KolMatchPayload>): StepRunner {
+function upstashStep(context: WorkflowContext<KolMatchPayload>, runId: string): StepRunner {
   return async <T>(name: string, fn: () => Promise<T>): Promise<T> => {
     const out = await context.run(name, async (): Promise<StepEnvelope<T>> => {
+      // Logged inside the step body, so only when the step really executes (not on replays).
+      const t0 = Date.now();
+      console.info(`[agent] step ${name} start run=${runId}`);
       try {
-        return { value: await fn() };
+        const value = await fn();
+        console.info(`[agent] step ${name} done run=${runId} in ${((Date.now() - t0) / 1000).toFixed(1)}s`);
+        return { value };
       } catch (err) {
         if (isRunInactive(err)) return { inactive: true };
+        console.error(
+          `[agent] step ${name} failed run=${runId} after ${((Date.now() - t0) / 1000).toFixed(1)}s: ${err instanceof Error ? err.message : String(err)}`,
+        );
         throw err;
       }
     });
@@ -51,7 +59,7 @@ function upstashStep(context: WorkflowContext<KolMatchPayload>): StepRunner {
 async function kolMatchWorkflow(context: WorkflowContext<KolMatchPayload>): Promise<PipelineOutcome> {
   const runId = payloadRunId(context.requestPayload);
   if (!runId) throw new WorkflowNonRetryableError('kol-match workflow payload has no runId');
-  return runKolMatch(runId, upstashStep(context));
+  return runKolMatch(runId, upstashStep(context, runId));
 }
 
 function createHandler(): (request: Request) => Promise<Response> {

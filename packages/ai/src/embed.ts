@@ -4,6 +4,7 @@ import { embeddingDimensions, embeddingModel } from './models';
 import { estimateEmbeddingCostUsd, reportUsage } from './pricing';
 import { segmentWords } from './text';
 import type { AiCtx } from './types';
+import { EMBED_TIMEOUT_MS, withTimeout } from './timeout';
 
 /** FNV-1a 32-bit hash. */
 function fnv1a(s: string, seed = 0x811c9dc5): number {
@@ -41,7 +42,7 @@ export async function embed(texts: string[], ctx?: AiCtx): Promise<number[][]> {
   // The API rejects empty strings; embed a single space instead so positions stay aligned.
   const values = texts.map((t) => (t.trim() ? t.normalize('NFC') : ' '));
   const { id, model } = embeddingModel();
-  const result = await embedMany({ model, values, dimensions: dims, maxRetries: 1, abortSignal: ctx?.signal });
+  const result = await embedMany({ model, values, dimensions: dims, maxRetries: 1, abortSignal: withTimeout(ctx?.signal, EMBED_TIMEOUT_MS) });
   await reportUsage(ctx, { model: id, inputTokens: result.usage.tokens, outputTokens: 0, costUsd: estimateEmbeddingCostUsd(id, result.usage.tokens) });
   return result.embeddings.map((e) => Array.from(e));
 }

@@ -193,14 +193,16 @@ export async function researchBrand(a: ResearchBrandArgs, ctx?: AiCtx): Promise<
   const { value, sourceUrls } = await generateStructured<LlmBrandProfile, BrandProfile>({
     stage: 'llm1_brand',
     tier: 'main',
-    effort: 'medium',
+    // 'medium' with web search and this large structured output took 57 s to well over 13 min in production runs;
+    // 'low' keeps the step inside the function limit, and the evidence cards carry most of the facts anyway.
+    effort: 'low',
     instructions: buildBrandInstructions(webSearch),
     userContent: buildBrandUserContent({ brief: a.brief, evidence: a.evidence, personas: a.personas, categories: a.categories }),
     llmSchema: LlmBrandProfileSchema,
     toDomain: (raw) => mapLlmBrandProfile(raw, a),
     domainSchema: BrandProfile,
     tools,
-    maxToolCalls: webSearch ? 8 : undefined,
+    maxToolCalls: webSearch ? 4 : undefined, // MVP cap (SYSTEM_DESIGN §17.5); each search adds latency
     maxOutputTokens: 16_000,
     ctx,
   });

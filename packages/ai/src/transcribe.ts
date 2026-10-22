@@ -3,6 +3,7 @@ import { shouldStub } from './env';
 import { transcriptionModel } from './models';
 import { estimateTranscribeCostUsd, reportUsage } from './pricing';
 import type { AiCtx } from './types';
+import { TRANSCRIBE_TIMEOUT_MS, withTimeout } from './timeout';
 
 const SUPPORTED_AUDIO = /^audio\/|^video\/(mp4|webm)/i;
 
@@ -26,7 +27,7 @@ export async function transcribe(audio: ArrayBuffer, filename: string, contentTy
     // Thai with English brand words is the common case; the hint does not stop English output.
     providerOptions: { openai: { language: 'th' } },
     maxRetries: 1,
-    abortSignal: ctx?.signal,
+    abortSignal: withTimeout(ctx?.signal, TRANSCRIBE_TIMEOUT_MS),
   });
   const durationS = result.durationInSeconds ?? (result.segments.length ? (result.segments.at(-1)?.endSecond ?? null) : null);
   await reportUsage(ctx, { model: id, inputTokens: 0, outputTokens: 0, costUsd: estimateTranscribeCostUsd(id, durationS) });

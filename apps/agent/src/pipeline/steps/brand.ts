@@ -50,7 +50,17 @@ export async function brandStep(runId: string): Promise<BrandCheckpoint> {
 
   const run = await loadActiveRun(runId);
   const started = Date.now();
-  await emitProgress(runId, { stage: 'brand', status: 'started', pct: 22, messageTh: 'กำลังวิเคราะห์แบรนด์ สินค้า และกลุ่มเป้าหมาย' });
+  // A retried step (time limit, provider error) runs again without web search: it is the slow, network-bound part,
+  // and the evidence cards plus the model still produce a usable profile.
+  const isRetry = (await store().listProgress(runId, 0)).some((e) => e.stage === 'brand' && e.status === 'started');
+  await emitProgress(runId, {
+    stage: 'brand',
+    status: 'started',
+    pct: 22,
+    messageTh: isRetry
+      ? 'กำลังวิเคราะห์แบรนด์อีกครั้ง โดยใช้ข้อมูลที่ดึงมาแล้ว (ไม่ค้นเว็บเพิ่ม)'
+      : 'กำลังวิเคราะห์แบรนด์ สินค้า และกลุ่มเป้าหมาย',
+  });
   await demoPause(run);
 
   const state = await guardBudget(runId);
@@ -64,7 +74,7 @@ export async function brandStep(runId: string): Promise<BrandCheckpoint> {
   const ledger = createAiCtx(runId);
   const brief = briefOf(run);
   const researched = await researchBrand(
-    { brief, evidence, personas, categories: ref.categories, allowWebSearch: state === 'ok' },
+    { brief, evidence, personas, categories: ref.categories, allowWebSearch: state === 'ok' && !isRetry },
     ledger.ctx,
   );
   const brand = applyUserConstraints(researched, run.input, brief.campaign);

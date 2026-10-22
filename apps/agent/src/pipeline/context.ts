@@ -143,11 +143,19 @@ export async function guardBudget(runId: string): Promise<BudgetState> {
 export type AiLedger = { ctx: AiCtx; spentUsd(): number; model(): string | undefined };
 
 /** AiCtx whose usage callback feeds the Redis budget and runs.cost_usd. */
+/**
+ * AI budget per step, below the workflow function's 800 s maxDuration: when a step's model calls run past it they abort
+ * (each call also has its own limit in @cvc/ai), the step fails with an error in the logs and QStash retries it,
+ * instead of the function being killed silently.
+ */
+const STEP_AI_BUDGET_MS = 600_000;
+
 export function createAiCtx(runId: string): AiLedger {
   let spent = 0;
   let lastModel: string | undefined;
   const ctx: AiCtx = {
     runId,
+    signal: AbortSignal.timeout(STEP_AI_BUDGET_MS),
     onUsage: async (u) => {
       spent += u.costUsd;
       lastModel = u.model;

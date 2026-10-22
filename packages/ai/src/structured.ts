@@ -4,6 +4,7 @@ import type { z } from 'zod';
 import { AiOutputError } from './env';
 import { languageModel, type ModelTier, type ReasoningEffort } from './models';
 import { reportTextUsage } from './pricing';
+import { LLM_CALL_TIMEOUT_MS, withTimeout } from './timeout';
 import type { AiCtx } from './types';
 
 export type StructuredCall<L, D> = {
@@ -76,17 +77,28 @@ async function attempt<L, D>(call: StructuredCall<L, D>, messages: ModelMessage[
   };
   if (call.maxToolCalls != null) openaiOptions.maxToolCalls = call.maxToolCalls;
 
-  const result = await generateText({
-    model,
-    instructions: call.instructions,
-    messages,
-    output: Output.object({ schema: call.llmSchema, name: call.stage }),
-    tools: call.tools,
-    maxOutputTokens: call.maxOutputTokens,
-    maxRetries: MODEL_MAX_RETRIES,
-    abortSignal: call.ctx?.signal,
-    providerOptions: { openai: openaiOptions },
-  });
+  const t0 = Date.now();
+  const tag = `[ai] ${call.stage} ${id}${call.ctx?.runId ? ` run=${call.ctx.runId}` : ''}`;
+  let result: Awaited<ReturnType<typeof generateText>>;
+  try {
+    result = await generateText({
+      model,
+      instructions: call.instructions,
+      messages,
+      output: Output.object({ schema: call.llmSchema, name: call.stage }),
+      tools: call.tools,
+      maxOutputTokens: call.maxOutputTokens,
+      maxRetries: MODEL_MAX_RETRIES,
+      abortSignal: withTimeout(call.ctx?.signal, LLM_CALL_TIMEOUT_MS),
+      providerOptions: { openai: openaiOptions },
+    });
+  } catch (err) {
+    console.error(`${tag} failed after ${seconds(t0)}: ${errorMessage(err)}`);
+    throw err;
+  }
+  console.info(
+    `${tag} done in ${seconds(t0)} finish=${result.finishReason} in=${result.usage.inputTokens ?? '?'} out=${result.usage.outputTokens ?? '?'} sources=${result.sources.length}`,
+  );
   await reportTextUsage(call.ctx, id, result.usage);
   for (const s of result.sources) {
     if (s.sourceType === 'url') sourceUrls.add(s.url);
@@ -109,6 +121,10 @@ async function attempt<L, D>(call: StructuredCall<L, D>, messages: ModelMessage[
   const parsed = call.domainSchema.safeParse(mapped);
   if (!parsed.success) return { ok: false, issues: compactZodIssues(parsed.error), rawText: result.text };
   return { ok: true, value: parsed.data, issues: call.check?.(parsed.data) ?? [], rawText: result.text };
+}
+
+function seconds(t0: number): string {
+  return `${((Date.now() - t0) / 1000).toFixed(1)}s`;
 }
 
 function errorMessage(err: unknown): string {
