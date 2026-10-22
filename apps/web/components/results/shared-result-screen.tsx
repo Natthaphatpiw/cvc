@@ -9,9 +9,9 @@ import { Card, SectionHeading } from '@/components/ui/card';
 import { DemoBanner } from '@/components/ui/demo-banner';
 import { EmptyState } from '@/components/ui/empty-state';
 import { ErrorBlock } from '@/components/ui/error-block';
-import { PageHeader } from '@/components/ui/page-header';
-import { Notice } from './notice';
+import { PartialResultNotice } from './notice';
 import { PlanPanel } from './plan-panel';
+import { ResultHero } from './result-hero';
 import { ResultLayout, ResultPageSkeleton } from './result-layout';
 
 type ShareState =
@@ -82,26 +82,24 @@ export function SharedResultScreen({ token }: { token: string }) {
   return (
     <div className="flex flex-col">
       {result.isDemo ? <DemoBanner /> : null}
-      <PageHeader
-        title={result.brand.name}
-        description={result.headlineTh}
-        className="mb-2!"
+      <ResultHero
+        result={result}
         actions={
           <ButtonLink href="/new" variant="primary">
             สร้างผลวิเคราะห์ของคุณ
           </ButtonLink>
         }
+        meta={
+          <>
+            แชร์โดยทีม Convert Cake · อ่านอย่างเดียว · ข้อมูล ณ {formatDateTh(result.methodology.dataAsOf)}
+            {expiresAt ? ` · ลิงก์ใช้ได้ถึง ${formatDateTh(expiresAt)}` : ''}
+          </>
+        }
       />
-      <p className="mb-6 text-meta text-muted">
-        แชร์โดยทีม Convert Cake · อ่านอย่างเดียว · ข้อมูล ณ {formatDateTh(result.methodology.dataAsOf)}
-        {expiresAt ? ` · ลิงก์ใช้ได้ถึง ${formatDateTh(expiresAt)}` : ''}
-      </p>
 
       {result.isPartial ? (
         <div className="mb-6">
-          <Notice tone="warning" title="ผลวิเคราะห์บางส่วน" role="note">
-            บางขั้นตอนหรือแหล่งข้อมูลไม่สำเร็จ ตัวเลขบางส่วนอาจขาดหาย
-          </Notice>
+          <PartialResultNotice result={result} />
         </div>
       ) : null}
 

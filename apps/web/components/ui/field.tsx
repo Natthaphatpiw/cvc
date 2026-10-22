@@ -100,10 +100,13 @@ export function Field({ label, hint, error, required, optional, children, group 
 }
 
 // 16px text on phones stops iOS from zooming into focused fields; 14px (text-body) from 640px up.
+// Focus: the global 2px accent outline sits on the border (offset 0) with a 4px accent-soft halo around it.
 const controlBase =
   'w-full rounded-control border border-input bg-surface text-[16px] leading-[22px] font-light text-text transition-colors duration-150 sm:text-body ' +
-  'hover:border-muted disabled:cursor-not-allowed disabled:bg-raised disabled:text-subtle ' +
-  'aria-[invalid=true]:border-negative';
+  'hover:border-muted focus-visible:border-accent focus-visible:outline-offset-0 focus-visible:ring-4 focus-visible:ring-accent-soft ' +
+  'disabled:cursor-not-allowed disabled:bg-raised disabled:text-subtle ' +
+  'aria-[invalid=true]:border-negative aria-[invalid=true]:focus-visible:border-negative ' +
+  'aria-[invalid=true]:focus-visible:outline-negative aria-[invalid=true]:focus-visible:ring-negative-soft';
 
 export function Input({ className, ...props }: ComponentProps<'input'>) {
   return <input className={cn(controlBase, 'h-11 px-3 sm:h-9', className)} {...props} />;

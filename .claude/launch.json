@@ -6,6 +6,38 @@
       "runtimeExecutable": "npm",
       "runtimeArgs": ["run", "dev"],
       "port": 3000
+    },
+    {
+      "name": "cvc-dev-demo",
+      "runtimeExecutable": "env",
+      "runtimeArgs": [
+        "DEMO_MODE=on",
+        "DEMO_STEP_DELAY_MS=100",
+        "PIPELINE_RUNNER=inline",
+        "AGENT_ORIGIN=http://localhost:3002",
+        "API_ORIGIN=http://localhost:3001",
+        "NEXT_PUBLIC_APP_URL=http://localhost:3000",
+        "EDGE_SHARED_SECRET=",
+        "SUPABASE_URL=",
+        "SUPABASE_SECRET_KEY=",
+        "NEXT_PUBLIC_SUPABASE_URL=",
+        "NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=",
+        "API_DATABASE_URL=",
+        "AGENT_DATABASE_URL=",
+        "QSTASH_TOKEN=",
+        "QSTASH_CURRENT_SIGNING_KEY=",
+        "QSTASH_NEXT_SIGNING_KEY=",
+        "BLOB_PRIVATE_READ_WRITE_TOKEN=",
+        "CREATOR_MEDIA_BLOB_READ_WRITE_TOKEN=",
+        "OPENAI_API_KEY=",
+        "SCRAPECREATORS_API_KEY=",
+        "APIFY_TOKEN=",
+        "FIRECRAWL_API_KEY=",
+        "npm",
+        "run",
+        "dev"
+      ],
+      "port": 3000
     }
   ]
 }

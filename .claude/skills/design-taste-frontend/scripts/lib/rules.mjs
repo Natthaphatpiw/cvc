@@ -65,7 +65,7 @@ export function judge(m, { width = m.viewport.w, allow = [] } = {}) {
 
   // --- surfaces
   const s = m.surfaces;
-  if (s.gradients) add('FAIL', 'gradient', `${s.gradients} gradient fill(s): ${s.gradientSamples.slice(0, 3).join(' | ')}`, 'Use a flat colour or a real image. The only gradient allowed by default is a neutral scrim over a photo for legibility.');
+  if (s.gradients) add('FAIL', 'gradient', `${s.gradients} gradient fill(s): ${s.gradientSamples.slice(0, 3).join(' | ')}`, 'Use a flat colour or a real image. The only gradient allowed by default is a neutral scrim over a photo for legibility; a gradient the design system needs is a --grad-* token applied through a CSS rule (e.g. @utility bg-hero), which this check skips.');
   if (s.gradientText) add('FAIL', 'gradient-text', `${s.gradientText} gradient-filled text element(s).`, 'Solid colour text.');
   if (s.shadowStatic) add('FAIL', 'shadow', `${s.shadowStatic} box-shadow(s) on elements at rest: ${s.shadowSamples.slice(0, 3).join(' | ')}`, 'Remove. Separate surfaces with a tone step or space. Shadows are for things that really float (menus, dialogs, sticky bars).');
   if (s.textShadow) add('FAIL', 'text-shadow', `${s.textShadow} text-shadow(s).`, 'Remove; fix legibility with a scrim or a different crop.');

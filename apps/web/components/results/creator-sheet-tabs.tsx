@@ -5,7 +5,9 @@ import Image from 'next/image';
 import { ExternalLink } from 'lucide-react';
 import type { FinalResult, KpiRange, Recommendation } from '@cvc/schemas';
 import { Badge } from '@/components/ui/badge';
+import { Disclosure } from '@/components/ui/disclosure';
 import { formatCompact, formatNumber, formatPct, formatTHBRange } from '@/lib/format';
+import { CreatorFitSummary } from './creator-fit-summary';
 import { AssumptionBadge, ConfidenceBadge } from './estimate-badges';
 import {
   benchmarkSourceLabel,
@@ -15,6 +17,7 @@ import {
   GROUP_LABEL,
   GROUP_ORDER,
   KPI_METHOD_LABEL,
+  previewTh,
   ROLE_LABEL,
   RUBRIC_LABEL,
   SPONSORED_SOURCE_LABEL,
@@ -28,11 +31,22 @@ import { cn } from '@/lib/cn';
 const TH = 'h-8 px-3 text-meta font-normal text-muted bg-raised whitespace-nowrap';
 const TD = 'h-10 px-3 border-b border-rule';
 
-function SheetSection({ title, children, aside }: { title: string; children: ReactNode; aside?: ReactNode }) {
+function SheetSection({
+  title,
+  children,
+  aside,
+  as: Heading = 'h3',
+}: {
+  title: string;
+  children: ReactNode;
+  aside?: ReactNode;
+  /** h4 inside a Disclosure group, whose own title is the h3. */
+  as?: 'h3' | 'h4';
+}) {
   return (
     <section className="flex flex-col gap-2">
       <div className="flex flex-wrap items-center justify-between gap-2">
-        <h3 className="text-body font-medium text-text">{title}</h3>
+        <Heading className="text-body font-medium text-text">{title}</Heading>
         {aside ? <div className="flex flex-wrap items-center gap-1.5">{aside}</div> : null}
       </div>
       {children}
@@ -95,6 +109,8 @@ export function OverviewTab({ rec, evidence }: { rec: Recommendation; evidence: 
 
   return (
     <div className="flex flex-col gap-6">
+      <CreatorFitSummary rec={rec} headingLevel="h3" />
+
       <SheetSection title="ทำไมถึงเหมาะ">
         {rec.narrativeStatus !== 'ready' ? (
           <p className="rounded-control bg-raised px-3 py-2 text-label font-light text-muted">
@@ -280,27 +296,33 @@ export function ForecastTab({ rec }: { rec: Recommendation }) {
         </dl>
       </SheetSection>
 
-      <SheetSection title="ที่มาของตัวเลข">
-        <div className="flex flex-col gap-2 text-body font-light text-text">
-          <p>
-            {KPI_METHOD_LABEL[b.method]} วิเคราะห์จากคลิป {formatNumber(b.videosAnalyzed)} คลิปในช่วง {formatNumber(b.windowDays)} วัน
-            (เป็นคลิปที่มีสปอนเซอร์ {formatNumber(b.sponsoredVideosAnalyzed)} คลิป) ปรับยอดวิวสำหรับโพสต์ที่มีสปอนเซอร์ด้วยตัวคูณ ×
-            {formatNumber(b.sponsoredFactor, 2)} {SPONSORED_SOURCE_LABEL[b.sponsoredFactorSource]}
-          </p>
-          {k.conversion ? (
+      {/* Reference material: closed by default; the confidence and assumption badges above stay visible. */}
+      <div className="border-y border-rule">
+        <Disclosure
+          title="ที่มาของตัวเลข"
+          preview={`วิเคราะห์จากคลิป ${formatNumber(b.videosAnalyzed)} คลิปในช่วง ${formatNumber(b.windowDays)} วัน · ${previewTh(KPI_METHOD_LABEL[b.method], 48)}`}
+        >
+          <div className="flex flex-col gap-2 text-body font-light text-text">
             <p>
-              คลิกและคำสั่งซื้อใช้อัตราคลิก {formatPct(k.conversion.assumptions.ctr, 2)} และอัตราการซื้อ{' '}
-              {formatPct(k.conversion.assumptions.cvr, 2)} ({benchmarkSourceLabel(k.conversion.assumptions.source)})
+              {KPI_METHOD_LABEL[b.method]} วิเคราะห์จากคลิป {formatNumber(b.videosAnalyzed)} คลิปในช่วง {formatNumber(b.windowDays)} วัน
+              (เป็นคลิปที่มีสปอนเซอร์ {formatNumber(b.sponsoredVideosAnalyzed)} คลิป) ปรับยอดวิวสำหรับโพสต์ที่มีสปอนเซอร์ด้วยตัวคูณ ×
+              {formatNumber(b.sponsoredFactor, 2)} {SPONSORED_SOURCE_LABEL[b.sponsoredFactorSource]}
             </p>
-          ) : null}
-          {b.benchmarkSources.length > 0 ? (
-            <p className="text-label text-muted">
-              ค่าอ้างอิงที่ใช้: {b.benchmarkSources.map(benchmarkSourceLabel).join(', ')}
-            </p>
-          ) : null}
-          <BulletList items={b.notesTh} />
-        </div>
-      </SheetSection>
+            {k.conversion ? (
+              <p>
+                คลิกและคำสั่งซื้อใช้อัตราคลิก {formatPct(k.conversion.assumptions.ctr, 2)} และอัตราการซื้อ{' '}
+                {formatPct(k.conversion.assumptions.cvr, 2)} ({benchmarkSourceLabel(k.conversion.assumptions.source)})
+              </p>
+            ) : null}
+            {b.benchmarkSources.length > 0 ? (
+              <p className="text-label text-muted">
+                ค่าอ้างอิงที่ใช้: {b.benchmarkSources.map(benchmarkSourceLabel).join(', ')}
+              </p>
+            ) : null}
+            <BulletList items={b.notesTh} />
+          </div>
+        </Disclosure>
+      </div>
     </div>
   );
 }
@@ -311,117 +333,149 @@ export function ForecastTab({ rec }: { rec: Recommendation }) {
 export function PlaybookTab({ rec, isDemo }: { rec: Recommendation; isDemo: boolean }) {
   const p = rec.playbook;
   const s = rec.storyline;
+  const angles = [...p.contentAnglesTh, ...rec.pitchAnglesTh];
+  const formats = p.recommendedFormats.map((f) => FORMAT_LABEL[f]).join(', ');
+  const ideaPreview = s?.conceptTh || angles[0] || 'ยังไม่มีคำแนะนำ';
+  const negotiationPreview = [
+    p.negotiationTh.length > 0 ? `ข้อเจรจา ${formatNumber(p.negotiationTh.length)} ข้อ` : null,
+    p.riskMitigations.length > 0 ? `ความเสี่ยงที่ต้องรับมือ ${formatNumber(p.riskMitigations.length)} เรื่อง` : null,
+  ]
+    .filter((t): t is string => t !== null)
+    .join(' · ');
+
+  // The role leads; the rest are four groups, closed except the first, each with a one-line preview.
   return (
     <div className="flex flex-col gap-6">
       <SheetSection title="บทบาทในแคมเปญ" aside={<Badge tone="accent">{ROLE_LABEL[p.role]}</Badge>}>
         <p className="text-body font-light text-text">{p.roleReasonTh}</p>
       </SheetSection>
 
-      <SheetSection title="รูปแบบคอนเทนต์ที่แนะนำ">
-        {p.recommendedFormats.length > 0 ? (
-          <ul className="flex flex-wrap gap-1.5">
-            {p.recommendedFormats.map((f) => (
-              <li key={f}>
-                <Badge tone="neutral">{FORMAT_LABEL[f]}</Badge>
-              </li>
-            ))}
-          </ul>
-        ) : (
-          <p className="text-label font-light text-muted">ยังไม่มีคำแนะนำ</p>
-        )}
-      </SheetSection>
+      <div className="divide-y divide-rule border-y border-rule">
+        <Disclosure
+          title="รูปแบบ ช่วงเวลา และความร่วมมือ"
+          preview={[formats, COLLABORATION_LABEL[p.collaborationModel]].filter(Boolean).join(' · ')}
+          defaultOpen
+          panelClassName="flex flex-col gap-5"
+        >
+          <SheetSection as="h4" title="รูปแบบคอนเทนต์ที่แนะนำ">
+            {p.recommendedFormats.length > 0 ? (
+              <ul className="flex flex-wrap gap-1.5">
+                {p.recommendedFormats.map((f) => (
+                  <li key={f}>
+                    <Badge tone="neutral">{FORMAT_LABEL[f]}</Badge>
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <p className="text-label font-light text-muted">ยังไม่มีคำแนะนำ</p>
+            )}
+          </SheetSection>
 
-      <SheetSection title="ช่วงเวลาโพสต์">
-        {p.postingWindow ? (
-          <div className="flex flex-col gap-1 text-body font-light">
-            <p>
-              <span className="text-muted">วัน </span>
-              {formatWeekdays(p.postingWindow.bestDays) || '–'}
-              <span className="text-muted"> · เวลา </span>
-              <span className="tabular-nums">{formatHourRanges(p.postingWindow.bestHours) || '–'}</span>
-            </p>
-            <p className="text-label text-muted">{p.postingWindow.basisTh}</p>
-          </div>
-        ) : (
-          <p className="text-label font-light text-muted">คลิปที่มีวันเวลาโพสต์ยังไม่พอสำหรับแนะนำช่วงเวลา</p>
-        )}
-      </SheetSection>
+          <SheetSection as="h4" title="ช่วงเวลาโพสต์">
+            {p.postingWindow ? (
+              <div className="flex flex-col gap-1 text-body font-light">
+                <p>
+                  <span className="text-muted">วัน </span>
+                  {formatWeekdays(p.postingWindow.bestDays) || '–'}
+                  <span className="text-muted"> · เวลา </span>
+                  <span className="tabular-nums">{formatHourRanges(p.postingWindow.bestHours) || '–'}</span>
+                </p>
+                <p className="text-label text-muted">{p.postingWindow.basisTh}</p>
+              </div>
+            ) : (
+              <p className="text-label font-light text-muted">คลิปที่มีวันเวลาโพสต์ยังไม่พอสำหรับแนะนำช่วงเวลา</p>
+            )}
+          </SheetSection>
 
-      <SheetSection title="รูปแบบความร่วมมือ" aside={<Badge tone="neutral">{COLLABORATION_LABEL[p.collaborationModel]}</Badge>}>
-        <p className="text-body font-light text-text">{p.collaborationNoteTh}</p>
-      </SheetSection>
+          <SheetSection as="h4" title="รูปแบบความร่วมมือ" aside={<Badge tone="neutral">{COLLABORATION_LABEL[p.collaborationModel]}</Badge>}>
+            <p className="text-body font-light text-text">{p.collaborationNoteTh}</p>
+          </SheetSection>
+        </Disclosure>
 
-      <SheetSection title="มุมคอนเทนต์">
-        <BulletList items={[...p.contentAnglesTh, ...rec.pitchAnglesTh]} empty="ยังไม่มีคำแนะนำ" />
-      </SheetSection>
+        <Disclosure title="ไอเดียและมุมคอนเทนต์" preview={previewTh(ideaPreview)} panelClassName="flex flex-col gap-5">
+          <SheetSection
+            as="h4"
+            title="ไอเดียคอนเทนต์"
+            aside={s ? <Badge tone="neutral">{isDemo ? 'ข้อความตัวอย่างจากเทมเพลต' : 'ร่างโดย AI ควรตรวจก่อนใช้'}</Badge> : undefined}
+          >
+            {s ? (
+              <dl className="grid grid-cols-1 gap-x-4 gap-y-2 text-body font-light sm:grid-cols-[120px_1fr]">
+                <dt className="text-muted">แนวคิด</dt>
+                <dd>{s.conceptTh}</dd>
+                <dt className="text-muted">ฮุก 3 วินาทีแรก</dt>
+                <dd>{s.hookTh}</dd>
+                <dt className="text-muted">รูปแบบ</dt>
+                <dd>{STORYLINE_FORMAT_LABEL[s.format]}</dd>
+                <dt className="text-muted">คำชวน (CTA)</dt>
+                <dd>{s.ctaTh}</dd>
+                <dt className="text-muted">ตัวอย่างแคปชัน</dt>
+                <dd className="whitespace-pre-line rounded-control bg-raised px-3 py-2">{s.sampleCaptionTh}</dd>
+                <dt className="text-muted">การเปิดเผยโฆษณา</dt>
+                <dd>{s.disclosure}</dd>
+              </dl>
+            ) : (
+              <p className="text-label font-light text-muted">ยังไม่มีไอเดียคอนเทนต์สำหรับครีเอเตอร์นี้</p>
+            )}
+          </SheetSection>
 
-      <SheetSection title="บรีฟ">
-        <div className="grid gap-4 sm:grid-cols-2">
-          <div className="rounded-control border border-border p-3">
-            <h4 className="text-label font-normal text-positive">ควรทำ</h4>
-            <div className="mt-1">
-              <BulletList items={p.briefDosTh} empty="–" />
+          <SheetSection as="h4" title="มุมคอนเทนต์">
+            <BulletList items={angles} empty="ยังไม่มีคำแนะนำ" />
+          </SheetSection>
+        </Disclosure>
+
+        <Disclosure
+          title="บรีฟ"
+          preview={`ควรทำ ${formatNumber(p.briefDosTh.length)} ข้อ · ไม่ควรทำ ${formatNumber(p.briefDontsTh.length)} ข้อ`}
+        >
+          <div className="grid gap-4 sm:grid-cols-2">
+            <div className="rounded-control border border-border p-3">
+              <h4 className="text-label font-normal text-positive">ควรทำ</h4>
+              <div className="mt-1">
+                <BulletList items={p.briefDosTh} empty="–" />
+              </div>
+            </div>
+            <div className="rounded-control border border-border p-3">
+              <h4 className="text-label font-normal text-negative">ไม่ควรทำ</h4>
+              <div className="mt-1">
+                <BulletList items={p.briefDontsTh} empty="–" />
+              </div>
             </div>
           </div>
-          <div className="rounded-control border border-border p-3">
-            <h4 className="text-label font-normal text-negative">ไม่ควรทำ</h4>
-            <div className="mt-1">
-              <BulletList items={p.briefDontsTh} empty="–" />
-            </div>
-          </div>
-        </div>
-      </SheetSection>
+        </Disclosure>
 
-      <SheetSection title="การเจรจา">
-        <BulletList items={p.negotiationTh} empty="ยังไม่มีคำแนะนำ" />
-      </SheetSection>
+        <Disclosure
+          title="การเจรจาและความเสี่ยง"
+          preview={negotiationPreview || 'ไม่มีข้อเจรจาหรือความเสี่ยงที่ต้องวางแผนเป็นพิเศษ'}
+          panelClassName="flex flex-col gap-5"
+        >
+          <SheetSection as="h4" title="การเจรจา">
+            <BulletList items={p.negotiationTh} empty="ยังไม่มีคำแนะนำ" />
+          </SheetSection>
 
-      <SheetSection title="ความเสี่ยงและวิธีรับมือ">
-        {p.riskMitigations.length > 0 ? (
-          <table className="w-full text-body font-light">
-            <thead>
-              <tr>
-                <th scope="col" className={cn(TH, 'w-1/2 rounded-l-chip text-left')}>ความเสี่ยง</th>
-                <th scope="col" className={cn(TH, 'rounded-r-chip text-left')}>วิธีรับมือ</th>
-              </tr>
-            </thead>
-            <tbody>
-              {p.riskMitigations.map((r, i) => (
-                <tr key={`${i}-${r.riskTh}`} className="align-top">
-                  <td className="border-b border-rule px-3 py-2">{r.riskTh}</td>
-                  <td className="border-b border-rule px-3 py-2">{r.mitigationTh}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        ) : (
-          <p className="text-label font-light text-muted">ไม่มีความเสี่ยงที่ต้องวางแผนรับมือเป็นพิเศษ</p>
-        )}
-      </SheetSection>
-
-      <SheetSection
-        title="ไอเดียคอนเทนต์"
-        aside={s ? <Badge tone="neutral">{isDemo ? 'ข้อความตัวอย่างจากเทมเพลต' : 'ร่างโดย AI ควรตรวจก่อนใช้'}</Badge> : undefined}
-      >
-        {s ? (
-          <dl className="grid grid-cols-1 gap-x-4 gap-y-2 text-body font-light sm:grid-cols-[120px_1fr]">
-            <dt className="text-muted">แนวคิด</dt>
-            <dd>{s.conceptTh}</dd>
-            <dt className="text-muted">ฮุก 3 วินาทีแรก</dt>
-            <dd>{s.hookTh}</dd>
-            <dt className="text-muted">รูปแบบ</dt>
-            <dd>{STORYLINE_FORMAT_LABEL[s.format]}</dd>
-            <dt className="text-muted">คำชวน (CTA)</dt>
-            <dd>{s.ctaTh}</dd>
-            <dt className="text-muted">ตัวอย่างแคปชัน</dt>
-            <dd className="whitespace-pre-line rounded-control bg-raised px-3 py-2">{s.sampleCaptionTh}</dd>
-            <dt className="text-muted">การเปิดเผยโฆษณา</dt>
-            <dd>{s.disclosure}</dd>
-          </dl>
-        ) : (
-          <p className="text-label font-light text-muted">ยังไม่มีไอเดียคอนเทนต์สำหรับครีเอเตอร์นี้</p>
-        )}
-      </SheetSection>
+          <SheetSection as="h4" title="ความเสี่ยงและวิธีรับมือ">
+            {p.riskMitigations.length > 0 ? (
+              <table className="w-full text-body font-light">
+                <thead>
+                  <tr>
+                    <th scope="col" className={cn(TH, 'w-1/2 rounded-l-chip text-left')}>ความเสี่ยง</th>
+                    <th scope="col" className={cn(TH, 'rounded-r-chip text-left')}>วิธีรับมือ</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {p.riskMitigations.map((r, i) => (
+                    <tr key={`${i}-${r.riskTh}`} className="align-top">
+                      <td className="border-b border-rule px-3 py-2">{r.riskTh}</td>
+                      <td className="border-b border-rule px-3 py-2">{r.mitigationTh}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            ) : (
+              <p className="text-label font-light text-muted">ไม่มีความเสี่ยงที่ต้องวางแผนรับมือเป็นพิเศษ</p>
+            )}
+          </SheetSection>
+        </Disclosure>
+      </div>
     </div>
   );
 }

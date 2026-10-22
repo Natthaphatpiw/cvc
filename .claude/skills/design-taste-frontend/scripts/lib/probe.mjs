@@ -52,6 +52,20 @@ export function probe() {
     }
     return false;
   };
+  // Gradients the project declares as design tokens: a custom property named --grad-* applied by a CSS rule (a
+  // utility such as `.bg-hero { background-image: var(--grad-hero) }`). They belong to the palette, like a colour
+  // token, so the gradient rules skip elements those rules style; a gradient written anywhere else still counts.
+  const gradSelectors = [];
+  const collectGrad = (rules) => {
+    for (const rule of rules) {
+      try {
+        if (rule.cssRules) collectGrad(rule.cssRules);
+        if (rule.selectorText && rule.style && /background[^;]*var\(--grad-/.test(rule.style.cssText)) gradSelectors.push(rule.selectorText);
+      } catch {}
+    }
+  };
+  for (const sheet of document.styleSheets) { try { collectGrad(sheet.cssRules); } catch {} } // cross-origin sheets throw
+  const tokenGradient = (el) => gradSelectors.some((sel) => { try { return el.matches(sel); } catch { return false; } });
   const GENERIC = /^(serif|sans-serif|monospace|system-ui|ui-sans-serif|ui-serif|ui-monospace|ui-rounded|cursive|fantasy|inherit|-apple-system|BlinkMacSystemFont|Segoe UI|Arial|Helvetica|Helvetica Neue|Times New Roman|Times|Georgia|Verdana|Tahoma|Courier New|Courier|Roboto|Apple Color Emoji)$/i;
 
   // --- collect elements
@@ -82,7 +96,7 @@ export function probe() {
       upper: cs.textTransform === 'uppercase' || (direct.length > 2 && direct === direct.toUpperCase() && /[A-Z]{2}/.test(direct)),
       italic: cs.fontStyle === 'italic', align: cs.textAlign, color: cs.color,
       top: r.top + SY, bottom: r.bottom + SY, left: r.left, right: r.right, w: r.width, h: r.height,
-      clipText: (cs.webkitBackgroundClip || cs.backgroundClip || '').includes('text'),
+      clipText: (cs.webkitBackgroundClip || cs.backgroundClip || '').includes('text') && !tokenGradient(el),
       inCode: !!el.closest('pre, code, kbd, samp, textarea'), inUI: !!el.closest('[data-ui]'), textShadow: cs.textShadow !== 'none',
     });
   }
@@ -254,7 +268,7 @@ export function probe() {
   const bgBehind = (el) => {
     for (let p = el; p && p !== document.documentElement; p = p.parentElement) {
       const cs = getComputedStyle(p);
-      if (cs.backgroundImage !== 'none' || p.tagName === 'VIDEO' || p.tagName === 'CANVAS') return null;
+      if ((cs.backgroundImage !== 'none' && !tokenGradient(p)) || p.tagName === 'VIDEO' || p.tagName === 'CANVAS') return null; // a token gradient is judged by its base colour
       const v = rgba(cs.backgroundColor); if (v.a >= 0.9) return v;
       if (cs.position === 'absolute' || cs.position === 'fixed') return null; // may overlap media
     }
@@ -297,7 +311,7 @@ export function probe() {
     buttons.push({
       text: (el.innerText || el.value || '').replace(/\s+/g, ' ').trim().slice(0, 40), filled: bg.a >= 0.5, bg: bg.a >= 0.5 ? hex(bg) : null, bgHsl: bg.a >= 0.5 ? hsl(bg) : null, fg: hex(rgba(cs.color)),
       radius: rad >= r.height / 2 - 1 ? 'pill' : Math.round(rad), h: Math.round(r.height), top: Math.round(r.top + SY),
-      shadow: cs.boxShadow !== 'none' && !/^rgba?\(0, 0, 0, 0\)/.test(cs.boxShadow), gradient: grad, upper: cs.textTransform === 'uppercase', mono: isMono(cs.fontFamily),
+      shadow: cs.boxShadow !== 'none' && !/^rgba?\(0, 0, 0, 0\)/.test(cs.boxShadow), gradient: grad && !tokenGradient(el), upper: cs.textTransform === 'uppercase', mono: isMono(cs.fontFamily),
     });
   }
   const mode = (arr) => { const m = new Map(); for (const a of arr) m.set(JSON.stringify(a), (m.get(JSON.stringify(a)) || 0) + 1); const top = [...m.entries()].sort((a, b) => b[1] - a[1])[0]; return top ? JSON.parse(top[0]) : undefined; };
@@ -318,7 +332,7 @@ export function probe() {
       const outer = sh.split(/,(?![^(]*\))/).some((part) => !/inset/.test(part) && !/ 0px 0px 0px 0px/.test(part) && !/rgba\(\d+, \d+, \d+, 0\)/.test(part));
       if (outer) { if (isOverlay(el) || el.closest('[data-ui]')) shadowOverlay++; else { shadowStatic++; if (shadowSamples.length < 4) shadowSamples.push(label(el) + ' → ' + sh.slice(0, 80)); } }
     }
-    if (cs.backgroundImage.includes('gradient(')) {
+    if (cs.backgroundImage.includes('gradient(') && !tokenGradient(el)) {
       if ((cs.webkitBackgroundClip || cs.backgroundClip || '').includes('text')) gradientText++;
       else if (b.area >= W * H * 0.02) {
         // neutral stops with changing alpha = a legibility scrim over media, not decoration

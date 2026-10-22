@@ -104,7 +104,7 @@ function ActionRow({
         type="checkbox"
         checked={checked}
         onChange={onToggle}
-        className="mt-[3px] size-4 shrink-0 cursor-pointer rounded-chip accent-accent"
+        className="mt-[3px] size-4 shrink-0 cursor-pointer rounded-[4px] accent-accent"
       />
       <div className="min-w-0">
         <label

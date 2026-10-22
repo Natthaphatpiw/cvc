@@ -1,5 +1,6 @@
 import {
   ApiError as ApiErrorBody,
+  AssistResponse,
   ChatSessionResponse,
   ClaimRequest,
   ClaimResponse,
@@ -20,6 +21,7 @@ import {
   TranscribeResponse,
   UpdateSavedRequest,
   FeedbackRequest,
+  type AssistRequestInput,
   type RunInputDraft,
 } from '@cvc/schemas';
 import { getSupabase } from './supabase';
@@ -304,6 +306,10 @@ export const agentApi = {
   },
   transcribe(assetPathname: string): Promise<TranscribeResponse> {
     return apiFetch('/api/agent/transcribe', { method: 'POST', json: { assetPathname }, schema: TranscribeResponse });
+  },
+  /** The form's AI prompt bar: fills the audience or campaign section for the user to edit before submitting. */
+  assist(req: AssistRequestInput, signal?: AbortSignal): Promise<AssistResponse> {
+    return apiFetch('/api/agent/assist', { method: 'POST', json: req, schema: AssistResponse, signal });
   },
 };
 

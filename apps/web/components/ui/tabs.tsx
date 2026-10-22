@@ -26,8 +26,8 @@ export function tabPanelProps(idPrefix: string, id: string) {
 }
 
 /**
- * Underline tabs on a 1px rule. Arrow keys / Home / End move between tabs and select them (automatic activation);
- * only the selected tab is in the Tab order.
+ * Underline tabs on a 1px rule; the selected tab has an accent label and a 2px accent underline. Arrow keys / Home /
+ * End move between tabs and select them (automatic activation); only the selected tab is in the Tab order.
  */
 export function Tabs({ items, value, onChange, idPrefix = 'tabs', ariaLabel, className }: TabsProps) {
   const refs = useRef<Array<HTMLButtonElement | null>>([]);
@@ -91,7 +91,7 @@ export function Tabs({ items, value, onChange, idPrefix = 'tabs', ariaLabel, cla
             className={cn(
               'relative h-10 shrink-0 whitespace-nowrap text-body font-normal transition-colors duration-150',
               selected
-                ? 'text-text after:absolute after:-inset-x-1 after:-bottom-px after:h-0.5 after:bg-text'
+                ? 'text-accent-ink after:absolute after:-inset-x-1 after:-bottom-px after:h-0.5 after:rounded-full after:bg-accent'
                 : 'text-muted hover:text-text',
             )}
           >

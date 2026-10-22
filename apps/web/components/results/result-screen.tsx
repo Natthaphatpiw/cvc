@@ -16,8 +16,9 @@ import { Tabs, tabPanelProps } from '@/components/ui/tabs';
 import { Tooltip } from '@/components/ui/tooltip';
 import { ChatPanel } from '@/components/chat/chat-panel';
 import { OBJECTIVE_LABEL } from './labels';
-import { Notice } from './notice';
+import { Notice, PartialResultNotice } from './notice';
 import { PlanPanel } from './plan-panel';
+import { ResultHero } from './result-hero';
 import { ResultLayout, ResultPageSkeleton } from './result-layout';
 import { WeightsSheet } from './weights-sheet';
 
@@ -49,16 +50,6 @@ function downloadJson(result: FinalResult) {
 
 function savedTitle(result: FinalResult): string {
   return `${result.brand.name} · ${formatDateTh(result.generatedAt)}`;
-}
-
-/** Partial results name what is missing (UI_CONTRACT §9). */
-function partialDetail(result: FinalResult): string {
-  const missing: string[] = [];
-  const noNarrative = result.recommendations.filter((r) => r.narrativeStatus !== 'ready').length;
-  if (noNarrative > 0) missing.push(`คำอธิบายของครีเอเตอร์ ${noNarrative} คนยังไม่พร้อม`);
-  if (result.evidence.length === 0) missing.push('ไม่มีแหล่งข้อมูลของแบรนด์ที่ดึงได้');
-  missing.push(...result.methodology.caveatsTh.slice(0, 2));
-  return missing.length > 0 ? missing.join(' · ') : 'บางขั้นตอนไม่สำเร็จ ตัวเลขบางส่วนอาจขาดหาย';
 }
 
 export function ResultScreen({ resultId }: { resultId: string }) {
@@ -262,16 +253,16 @@ export function ResultScreen({ resultId }: { resultId: string }) {
     <div className="flex flex-col">
       {displayed.isDemo ? <DemoBanner /> : null}
 
-      <PageHeader
-        title={displayed.brand.name}
-        description={displayed.headlineTh}
+      <ResultHero
+        result={displayed}
         actions={actions}
-        className="mb-2!"
+        meta={
+          <>
+            เวอร์ชัน {displayed.version} · สร้างเมื่อ {formatDateTh(displayed.generatedAt, { withTime: true })} · เป้าหมาย{' '}
+            {OBJECTIVE_LABEL[displayed.brief.objective]}
+          </>
+        }
       />
-      <p className="mb-4 text-meta text-muted">
-        เวอร์ชัน {displayed.version} · สร้างเมื่อ {formatDateTh(displayed.generatedAt, { withTime: true })} · เป้าหมาย{' '}
-        {OBJECTIVE_LABEL[displayed.brief.objective]}
-      </p>
 
       <div aria-live="polite" className="empty:hidden mb-4">
         {flash ? (
@@ -296,11 +287,7 @@ export function ResultScreen({ resultId }: { resultId: string }) {
             โหลดผลวิเคราะห์จากเซิร์ฟเวอร์ไม่ได้ (อาจหมดอายุแล้ว) แชท การปรับน้ำหนัก และการแชร์จึงใช้ไม่ได้
           </Notice>
         ) : null}
-        {displayed.isPartial ? (
-          <Notice tone="warning" title="ผลวิเคราะห์บางส่วน" role="note">
-            {partialDetail(displayed)}
-          </Notice>
-        ) : null}
+        {displayed.isPartial ? <PartialResultNotice result={displayed} /> : null}
         {displayed.redactedCreators > 0 ? (
           <Notice tone="neutral" title={`${displayed.redactedCreators} ครีเอเตอร์ถูกนำออกจากผลลัพธ์นี้ตามคำขอของเจ้าของข้อมูล`} role="note" />
         ) : null}

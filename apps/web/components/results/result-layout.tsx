@@ -13,13 +13,15 @@ import { CreatorsTable, CreatorsTableSkeleton, type RankDeltas } from './creator
 import { EvidenceList } from './evidence-list';
 import { KpiStrip, KpiStripSkeleton } from './kpi-strip';
 import { MethodologyCard } from './methodology-card';
+import { heroOverviewTh, ResultHeroSkeleton } from './result-hero';
 
 export const CREATOR_PARAM = 'creator';
 
 /**
- * KPI strip, then `1fr 384px` from 1600px (stacked below that): creators and added-from-chat, the caller's rail,
- * then alternatives, methodology and evidence. Rows open the
- * creator sheet, deep-linked with ?creator=<creatorId>.
+ * "ภาพรวมชุดครีเอเตอร์" (the headlineTh lead and the KPI cards), then `1fr 384px` once <main> is 1280px wide
+ * (stacked below that): creators and added-from-chat, the caller's rail, then alternatives, methodology and
+ * evidence. Rows open the creator sheet, deep-linked with ?creator=<creatorId>. The page must sit in a
+ * `@container/main` (the shell's and the share page's <main>).
  */
 export function ResultLayout({
   result,
@@ -60,14 +62,22 @@ export function ResultLayout({
   const open = useCallback((creatorId: string) => router.push(withParam(creatorId), { scroll: false }), [router, withParam]);
   const close = useCallback(() => router.replace(withParam(null), { scroll: false }), [router, withParam]);
 
+  // Very old results without a brand summary show headlineTh in the hero already; do not repeat it here.
+  const lead = result.headlineTh && heroOverviewTh(result) !== result.headlineTh ? result.headlineTh : '';
+
   return (
     <>
-      <KpiStrip result={result} />
+      <section aria-labelledby="sec-portfolio">
+        <SectionHeading id="sec-portfolio" title="ภาพรวมชุดครีเอเตอร์" />
+        {lead ? <p className="mb-3 max-w-[70ch] text-body font-light text-text">{lead}</p> : null}
+        <KpiStrip result={result} />
+      </section>
 
-      {/* The rail sits beside the creators only from 1600px, where the table still fits; narrower screens stack
-          creators → rail → the rest, so the plan and chat stay next to the shortlist. */}
-      <div className="mt-6 grid grid-cols-1 gap-x-6 gap-y-8 min-[1600px]:grid-cols-[minmax(0,1fr)_384px]">
-        <div className="flex min-w-0 flex-col gap-8 min-[1600px]:col-start-1">
+      {/* The rail sits beside the creators only once <main> is 1280px wide (its maximum), where the table still
+          fits; a collapsed sidebar reaches that on narrower screens. Below it everything stacks creators → rail →
+          the rest, so the plan and chat stay next to the shortlist. */}
+      <div className="mt-8 grid grid-cols-1 gap-x-6 gap-y-8 @min-[1280px]/main:grid-cols-[minmax(0,1fr)_384px]">
+        <div className="flex min-w-0 flex-col gap-8 @min-[1280px]/main:col-start-1">
           <section aria-labelledby="sec-creators">
             <SectionHeading id="sec-creators" title={`ครีเอเตอร์ที่แนะนำ (${result.recommendations.length})`} />
             {result.recommendations.length > 0 ? (
@@ -108,12 +118,12 @@ export function ResultLayout({
         <aside
           id="result-rail"
           aria-label="แผนงานและถาม-ตอบ"
-          className="min-w-0 scroll-mt-6 min-[1600px]:col-start-2 min-[1600px]:row-span-2 min-[1600px]:row-start-1 min-[1600px]:self-start"
+          className="min-w-0 scroll-mt-6 @min-[1280px]/main:col-start-2 @min-[1280px]/main:row-span-2 @min-[1280px]/main:row-start-1 @min-[1280px]/main:self-start"
         >
           {rail}
         </aside>
 
-        <div className="flex min-w-0 flex-col gap-8 min-[1600px]:col-start-1">
+        <div className="flex min-w-0 flex-col gap-8 @min-[1280px]/main:col-start-1">
           {result.alternatives.length > 0 ? (
             <section aria-labelledby="sec-alternatives">
               <SectionHeading id="sec-alternatives" title="ตัวเลือกอื่น" />
@@ -121,14 +131,13 @@ export function ResultLayout({
             </section>
           ) : null}
 
-          <section aria-labelledby="sec-methodology">
-            <SectionHeading id="sec-methodology" title="วิธีคำนวณ" action={methodologyAction} />
-            <MethodologyCard methodology={result.methodology} isPreview={isPreview} />
+          {/* Reference cards, closed by default; their h2 sits inside the card with the toggle. */}
+          <section aria-label="วิธีคำนวณ">
+            <MethodologyCard methodology={result.methodology} isPreview={isPreview} action={methodologyAction} />
           </section>
 
           {result.evidence.length > 0 ? (
-            <section aria-labelledby="sec-evidence">
-              <SectionHeading id="sec-evidence" title="แหล่งข้อมูลที่อ้างอิง" />
+            <section aria-label="แหล่งข้อมูลที่อ้างอิง">
               <EvidenceList items={result.evidence} />
             </section>
           ) : null}
@@ -148,23 +157,20 @@ export function ResultLayout({
   );
 }
 
-/** Header, KPI strip, table rows and rail at their real sizes. */
+/**
+ * Hero, portfolio KPI cards, table rows and rail at their real sizes. It sits in the same `@container/main` as the
+ * page, so the rail appears at the same width.
+ */
 export function ResultPageSkeleton() {
   return (
     <div aria-busy="true" aria-label="กำลังโหลดผลวิเคราะห์">
-      <div className="mb-6 flex flex-wrap items-end justify-between gap-x-6 gap-y-3">
-        <div className="flex min-w-0 flex-1 basis-72 flex-col gap-2">
-          <Skeleton className="h-8 w-56" />
-          <Skeleton className="h-[22px] w-full max-w-md" />
-        </div>
-        <div className="flex gap-2">
-          <Skeleton className="h-9 w-20" />
-          <Skeleton className="h-9 w-20" />
-          <Skeleton className="h-9 w-24" />
-        </div>
+      <ResultHeroSkeleton />
+      <div className="mb-2 flex min-h-8 items-end">
+        <Skeleton className="h-6 w-44" />
       </div>
+      <Skeleton className="mb-3 h-4 w-full max-w-[56ch]" />
       <KpiStripSkeleton />
-      <div className="mt-6 grid grid-cols-1 gap-6 min-[1600px]:grid-cols-[minmax(0,1fr)_384px]">
+      <div className="mt-8 grid grid-cols-1 gap-6 @min-[1280px]/main:grid-cols-[minmax(0,1fr)_384px]">
         <div className="flex flex-col gap-2">
           <Skeleton className="h-6 w-40" />
           <CreatorsTableSkeleton rows={5} />
@@ -174,15 +180,18 @@ export function ResultPageSkeleton() {
             <Skeleton className="h-[22px] w-14" />
             <Skeleton className="h-[22px] w-14" />
           </div>
-          <div className="flex flex-col gap-3 rounded-card border border-border bg-surface p-5">
+          {/* the plan card: the open consultant summary, then collapsed sections */}
+          <div className="flex flex-col gap-3 rounded-card border border-border bg-surface p-5 shadow-card">
             <Skeleton className="h-5 w-32" />
             <Skeleton className="h-4 w-full" />
             <Skeleton className="h-4 w-11/12" />
             <Skeleton className="h-4 w-3/4" />
-            <Skeleton className="mt-3 h-5 w-28" />
-            <Skeleton className="h-10 w-full" />
-            <Skeleton className="h-10 w-full" />
-            <Skeleton className="h-10 w-full" />
+            {[0, 1, 2, 3].map((i) => (
+              <div key={i} className="flex flex-col gap-1.5 border-t border-rule pt-3">
+                <Skeleton className="h-5 w-28" />
+                <Skeleton className="h-3.5 w-48" />
+              </div>
+            ))}
           </div>
         </div>
       </div>

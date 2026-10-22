@@ -34,13 +34,14 @@ export const TIER_LABEL: Record<Tier, string> = {
   mega: 'Mega',
 };
 
+/** Same words as the form (objective-control.tsx) and the agent's OBJECTIVE_LABEL_TH, which the overview text uses. */
 export const OBJECTIVE_LABEL: Record<Objective, string> = {
-  awareness: 'สร้างการรับรู้',
+  awareness: 'รับรู้แบรนด์',
   launch: 'เปิดตัวสินค้า',
-  conversion: 'เน้นยอดขาย',
-  tiktok_shop: 'ขายผ่าน TikTok Shop',
-  brand_building: 'สร้างภาพลักษณ์แบรนด์',
-  ugc: 'ผลิตคอนเทนต์ UGC',
+  conversion: 'เพิ่มยอดขาย',
+  tiktok_shop: 'TikTok Shop',
+  brand_building: 'สร้างแบรนด์ระยะยาว',
+  ugc: 'คอนเทนต์ UGC',
 };
 
 export const OBJECTIVE_ORDER: readonly Objective[] = ['awareness', 'launch', 'conversion', 'tiktok_shop', 'brand_building', 'ugc'];
@@ -168,4 +169,15 @@ export function benchmarkSourceLabel(source: string): string {
 
 export function dueLabel(days: number): string {
   return days <= 0 ? 'ทำได้ทันที' : `ภายใน ${days} วัน`;
+}
+
+/**
+ * One short line for a collapsed Disclosure preview (it is also read as the trigger's description, so a whole
+ * paragraph would be too long). Thai separates phrases with spaces, so cut at the last space before `max`.
+ */
+export function previewTh(text: string, max = 80): string {
+  const flat = text.replace(/\s+/g, ' ').trim();
+  if (flat.length <= max) return flat;
+  const cut = flat.lastIndexOf(' ', max);
+  return `${flat.slice(0, cut > max / 2 ? cut : max).trimEnd()}…`;
 }

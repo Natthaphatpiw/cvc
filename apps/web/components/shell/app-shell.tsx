@@ -7,21 +7,24 @@ import { Menu, SquarePen } from 'lucide-react';
 import { Sheet } from '@/components/ui/sheet';
 import { screenName } from './nav';
 import { SidebarContent } from './sidebar-content';
+import { useSidebarCollapsed } from './use-sidebar-collapsed';
 
 /**
- * Open-plane shell: labelled 240px sidebar on the page ground with one hairline (≥ 1024px);
- * below that a 48px top bar with the screen name and a full-screen menu sheet.
+ * Shell: white labelled sidebar (≥ 1024px) that collapses to a 76px icon rail; below that a 48px top bar with the
+ * screen name and a full-screen menu sheet. The column width comes from --sidebar-w, which the <html> attribute set
+ * before paint switches, so the collapsed state never flashes wide. <main> is a size container named `main`.
  */
 export function AppShell({ children }: { children: ReactNode }) {
   const pathname = usePathname() ?? '/';
   const [menuOpen, setMenuOpen] = useState(false);
+  const { collapsed, toggleCollapsed } = useSidebarCollapsed();
 
   useEffect(() => {
     setMenuOpen(false);
   }, [pathname]);
 
   return (
-    <div className="min-h-svh lg:grid lg:grid-cols-[240px_minmax(0,1fr)]">
+    <div className="min-h-svh lg:grid lg:grid-cols-[var(--sidebar-w)_minmax(0,1fr)] lg:transition-[grid-template-columns] lg:duration-200 lg:ease-out lg:motion-reduce:transition-none">
       <a
         href="#main"
         className="sr-only z-[80] rounded-control bg-surface px-3 py-2 text-body text-accent shadow-float focus:not-sr-only focus:fixed focus:left-3 focus:top-3"
@@ -29,12 +32,15 @@ export function AppShell({ children }: { children: ReactNode }) {
         ข้ามไปเนื้อหาหลัก
       </a>
 
-      <aside className="sticky top-0 hidden h-svh flex-col overflow-y-auto border-r border-border px-2 py-4 lg:flex">
-        <SidebarContent />
+      <aside
+        data-rail
+        className="sticky top-0 hidden h-svh flex-col overflow-y-auto overflow-x-hidden border-r border-border bg-surface px-4 py-5 lg:flex"
+      >
+        <SidebarContent collapsed={collapsed} onToggleCollapsed={toggleCollapsed} />
       </aside>
 
       <div className="min-w-0">
-        <header className="sticky top-0 z-30 flex h-12 items-center gap-1 border-b border-border bg-ground px-1.5 lg:hidden">
+        <header className="sticky top-0 z-30 flex h-12 items-center gap-1 border-b border-border bg-surface px-1.5 lg:hidden">
           <button
             type="button"
             onClick={() => setMenuOpen(true)}
@@ -57,7 +63,12 @@ export function AppShell({ children }: { children: ReactNode }) {
           ) : null}
         </header>
 
-        <main id="main" tabIndex={-1} className="mx-auto w-full max-w-[1344px] px-4 pb-16 pt-5 outline-none sm:px-6 lg:px-8 lg:pt-8">
+        {/* @container/main: pages size their columns to the room the sidebar leaves (e.g. @min-[1280px]/main:...). */}
+        <main
+          id="main"
+          tabIndex={-1}
+          className="@container/main mx-auto w-full max-w-[1344px] px-4 pb-16 pt-5 outline-none sm:px-6 lg:px-8 lg:pt-8"
+        >
           {children}
         </main>
       </div>

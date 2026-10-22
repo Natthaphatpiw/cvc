@@ -1,13 +1,41 @@
+import type { ReactNode } from 'react';
 import type { FinalResult } from '@cvc/schemas';
 import { Badge } from '@/components/ui/badge';
-import { Card } from '@/components/ui/card';
+import { Disclosure } from '@/components/ui/disclosure';
 import { formatDateTh, formatNumber, formatPct } from '@/lib/format';
 import { GROUP_LABEL, GROUP_ORDER, OBJECTIVE_LABEL } from './labels';
 
-/** How the ranking was computed: preset, weights, pool size, sources, data date, caveats. */
-export function MethodologyCard({ methodology, isPreview }: { methodology: FinalResult['methodology']; isPreview?: boolean }) {
+/**
+ * How the ranking was computed: preset, weights, pool size, sources, data date, caveats. Reference material, so it
+ * is closed by default; an unsaved weight preview and the number of caveats stay visible on the closed card.
+ */
+export function MethodologyCard({
+  methodology,
+  isPreview,
+  action,
+}: {
+  methodology: FinalResult['methodology'];
+  isPreview?: boolean;
+  /** On the header row, outside the toggle (e.g. "ปรับน้ำหนัก"). */
+  action?: ReactNode;
+}) {
+  const caveats = methodology.caveatsTh.length;
   return (
-    <Card>
+    <Disclosure
+      variant="card"
+      headingLevel="h2"
+      title="วิธีคำนวณ"
+      preview={`สูตร${OBJECTIVE_LABEL[methodology.preset]} · ประเมินละเอียด ${formatNumber(methodology.candidatesEvaluated)} จาก ${formatNumber(methodology.candidatesScanned)} คน · ข้อมูล ณ ${formatDateTh(methodology.dataAsOf)}`}
+      meta={
+        isPreview || caveats > 0 ? (
+          <>
+            {isPreview ? <Badge tone="warning">ปรับเอง ยังไม่บันทึก</Badge> : null}
+            {caveats > 0 ? <Badge tone="warning">ข้อควรระวัง {formatNumber(caveats)} ข้อ</Badge> : null}
+          </>
+        ) : undefined
+      }
+      action={action}
+    >
       <div className="flex flex-col gap-5">
         <div className="flex flex-wrap items-center gap-2 text-label font-light text-muted">
           <span>สูตรน้ำหนัก</span>
@@ -74,6 +102,6 @@ export function MethodologyCard({ methodology, isPreview }: { methodology: Final
           </div>
         ) : null}
       </div>
-    </Card>
+    </Disclosure>
   );
 }

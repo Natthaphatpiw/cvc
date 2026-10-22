@@ -1,4 +1,6 @@
 import type { ReactNode } from 'react';
+import type { FinalResult } from '@cvc/schemas';
+import { Disclosure } from '@/components/ui/disclosure';
 import { cn } from '@/lib/cn';
 
 type NoticeTone = 'neutral' | 'accent' | 'warning' | 'negative';
@@ -38,5 +40,34 @@ export function Notice({
       </div>
       {actions ? <div className="flex shrink-0 flex-wrap items-center gap-2">{actions}</div> : null}
     </div>
+  );
+}
+
+/** What a partial result is missing (UI_CONTRACT §9): creators without a narrative, no brand sources, caveats. */
+export function partialDetailsTh(result: FinalResult): string[] {
+  const missing: string[] = [];
+  const noNarrative = result.recommendations.filter((r) => r.narrativeStatus !== 'ready').length;
+  if (noNarrative > 0) missing.push(`คำอธิบายของครีเอเตอร์ ${noNarrative} คนยังไม่พร้อม`);
+  if (result.evidence.length === 0) missing.push('ไม่มีแหล่งข้อมูลของแบรนด์ที่ดึงได้');
+  missing.push(...result.methodology.caveatsTh.slice(0, 2));
+  return missing;
+}
+
+/** The partial-result warning: the warning itself stays visible, the list of what is missing opens below it. */
+export function PartialResultNotice({ result }: { result: FinalResult }) {
+  const details = partialDetailsTh(result);
+  return (
+    <Notice tone="warning" title="ผลวิเคราะห์บางส่วน" role="note">
+      <p>บางขั้นตอนหรือแหล่งข้อมูลไม่สำเร็จ ตัวเลขบางส่วนอาจขาดหาย</p>
+      {details.length > 0 ? (
+        <Disclosure variant="inline" title="ดูรายละเอียด" className="mt-1">
+          <ul className="list-disc space-y-0.5 pl-5">
+            {details.map((d) => (
+              <li key={d}>{d}</li>
+            ))}
+          </ul>
+        </Disclosure>
+      ) : null}
+    </Notice>
   );
 }

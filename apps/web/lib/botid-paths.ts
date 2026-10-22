@@ -5,7 +5,7 @@
  * Guest sessions can also be minted directly at Supabase with the public key, so every route a guest can spend
  * resources on is listed here (uploads included: our Blob upload has no server callback that BotID could block).
  */
-export const BOTID_PROTECTED_POSTS = ['/api/auth/guest', '/api/agent/runs', '/api/agent/transcribe', '/api/uploads/token'] as const;
+export const BOTID_PROTECTED_POSTS = ['/api/auth/guest', '/api/agent/runs', '/api/agent/transcribe', '/api/agent/assist', '/api/uploads/token'] as const;
 
 /** Set by the web route handlers after checkBotId() passes; cvc-api / cvc-agent trust it only behind x-cvc-edge. */
 export const BOTID_HEADER = 'x-cvc-botid';

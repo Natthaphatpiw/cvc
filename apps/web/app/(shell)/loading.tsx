@@ -10,7 +10,7 @@ export default function ShellLoading() {
         </div>
         <Skeleton className="hidden h-9 w-40 rounded-control sm:block" />
       </div>
-      <div className="overflow-hidden rounded-card border border-border bg-surface">
+      <div className="overflow-hidden rounded-card border border-border bg-surface shadow-card">
         <div className="h-9 bg-raised" />
         {Array.from({ length: 6 }, (_, i) => (
           <div key={i} className="flex h-12 items-center gap-4 border-t border-rule px-4">

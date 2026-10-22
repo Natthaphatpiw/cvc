@@ -36,8 +36,8 @@ if (tooBig.length) console.error(`Skipped (over 4 MB, check by hand): ${tooBig.j
 // Each rule: [level, id, regex, message]. Tested per line. `code` lines (inside <pre>/<code>) skip the mono rule.
 const R = [
   ['FAIL', 'mono', /\bfont-mono\b|font-family\s*:[^;{}]*(mono\b|monospace|Courier|Consolas|Menlo|Monaco)|(JetBrains|Geist|IBM\+?Plex|Space|DM|Roboto|Fragment|Azeret|Red\+?Hat|Martian|Commit|Departure|Fira)[+_ ]?Mono|Geist_Mono|GeistMono|Fira[+ ]Code|ui-monospace/i, 'Monospace type. Only literal code may be monospace.'],
-  ['FAIL', 'gradient', /(linear|radial|conic)-gradient\(|\bbg-(gradient|linear|radial|conic)-|\b(from|via)-(?!\[?0)[a-z]+-\d{2,3}\b/, 'Gradient fill. Use a flat colour or a real image (a neutral scrim over a photo is the one exception).'],
-  ['FAIL', 'gradient-text', /bg-clip-text|background-clip\s*:\s*text|text-transparent/, 'Gradient / clipped text. Use solid colour.'],
+  ['FAIL', 'gradient', /(linear|radial|conic)-gradient\(|\bbg-(gradient|linear|radial|conic)-|\b(from|via)-(?!\[?0)[a-z]+-\d{2,3}\b/, 'Gradient fill. Use a flat colour or a real image (a neutral scrim over a photo is the one exception). A gradient the design system needs is declared once as a --grad-* token and applied through an @utility.'],
+  ['FAIL', 'gradient-text', /bg-clip-text|background-clip\s*:\s*text|text-transparent/, 'Gradient / clipped text. Use solid colour, or a declared --grad-* token applied through an @utility.'],
   ['FAIL', 'shadow', /box-shadow\s*:\s*(?!none|0 0 #0000|var\(--tw)|\bshadow(-(sm|md|lg|xl|2xl|inner|\[[^\]]+\]))?(?=["'\s`])(?<!-shadow)|drop-shadow\(|\bdrop-shadow(-|\b)|text-shadow\s*:\s*(?!none)/, 'Shadow. Elements at rest carry none; only real overlays (menu, dialog, sticky bar) may.'],
   ['FAIL', 'numbering', />\s*[(\[]?0[1-9][)\]]?\.?\s*<|["'`]\s*0[1-9]\s*["'`]|decimal-leading-zero|>\s*(Step|Phase|No\.?|Chapter)\s*0?\d\s*</i, 'Decorative index numbering (01 / 02 / 03).'],
   ['WARN', 'numbering', /padStart\(\s*2\s*,\s*["']0["']\s*\)/, 'Zero-padding in script. Fine for a clock, a date or a price; if it builds 01 / 02 / 03 labels, remove it.'],
@@ -65,16 +65,28 @@ if (appMode) {
   R.push(['WARN', 'framework-colour', /#(3b82f6|2563eb|1d4ed8|60a5fa|10b981|22c55e|ef4444|f59e0b)\b/i, 'A framework default colour (Tailwind blue, green, red, amber). Take the accent and status colours from the dealt style.']);
 }
 
+// Gradient tokens: a project may declare gradients as design tokens, a custom property named --grad-* (its value
+// may run over several lines, up to the `;`), and apply them only through flat @utility blocks that use var(--grad-*)
+// (e.g. `@utility bg-hero { background-image: var(--grad-hero) }`). Those declarations and utilities are the
+// palette, like a colour token; a gradient or clipped text written anywhere else still fails.
+const GRAD_TOKEN = /^\s*--grad-[\w-]*\s*:/;
+const gradUtilities = (text) => new Set([...text.matchAll(/@utility\s+([\w-]+)\s*\{([^{}]*)\}/g)].filter((m) => /var\(--grad-/.test(m[2])).map((m) => m[1]));
+
 const findings = [];
 let emDashes = 0;
 for (const file of files) {
   const rel = relative(process.cwd(), file).split('\\').join('/');
-  const lines = readFileSync(file, 'utf8').split(/\r?\n/);
-  let inCode = false; let selector = ''; let pending = '';
+  const text = readFileSync(file, 'utf8');
+  const lines = text.split(/\r?\n/);
+  const tokenUtilities = gradUtilities(text);
+  let inCode = false; let selector = ''; let pending = ''; let inGradToken = false;
   lines.forEach((line, i) => {
     // track the CSS selector we are inside, so rules scoped to [data-ui] (interface fragments) keep their own lines
     if (line.includes('{')) { selector = pending + line.slice(0, line.indexOf('{')); pending = ''; } else if (!line.includes('}')) pending = (pending + ' ' + line).slice(-300);
     const inUi = /data-ui/.test(selector) || /data-ui/.test(line);
+    const gradToken = inGradToken || GRAD_TOKEN.test(line);
+    inGradToken = gradToken && !line.includes(';');
+    const gradUtility = tokenUtilities.has(/@utility\s+([\w-]+)/.exec(selector)?.[1]);
     if (line.includes('}') && !line.includes('{')) { selector = ''; pending = ''; }
     if (/<(pre|code)\b/i.test(line)) inCode = true;
     const codeLine = inCode || /<(pre|code|kbd|samp)\b/i.test(line);
@@ -87,6 +99,7 @@ for (const file of files) {
       if (id === 'mono' && (codeLine || /(^|[\s,>+~(])(pre|code|kbd|samp)\b|code/i.test(selector))) continue; // real code may be monospace
       if ((id === 'hairline' || id === 'outlined-box') && /(^|[\s,>+~(])(table|thead|tbody|tfoot|tr|td|th|input|textarea|select|fieldset)\b/i.test(selector)) continue; // real tables and form fields keep their lines
       if (inUi && (id === 'hairline' || id === 'outlined-box' || id === 'shadow')) continue;
+      if ((gradToken || gradUtility) && (id === 'gradient' || id === 'gradient-text')) continue; // declared gradient tokens
       if (id === 'hairline' && /sr-only|visually-hidden|clip(-path)?\s*:|outline/i.test(line + selector)) continue; // screen-reader helpers and focus outlines are not rules
       if ((id === 'copy' || id === 'cta-copy' || id === 'emoji') && /^\s*(\/\/|\/\*|\*|import |@import|<!--)/.test(line)) continue;
       const m = line.match(re);

@@ -1,44 +1,45 @@
 'use client';
 
-import type { ReactNode } from 'react';
 import type { FinalResult } from '@cvc/schemas';
 import { CreatorAvatar } from '@/components/ui/creator-avatar';
-import { formatPct, formatTHBRange } from '@/lib/format';
+import { Disclosure } from '@/components/ui/disclosure';
+import { formatNumber, formatPct, formatTHBRange } from '@/lib/format';
+import { previewTh } from './labels';
 import { NextActionList } from './next-actions';
 
-function Block({ title, children }: { title: string; children: ReactNode }) {
-  return (
-    <section className="border-t border-rule pt-4 first:border-t-0 first:pt-0">
-      <h3 className="text-body font-medium text-text">{title}</h3>
-      <div className="mt-2">{children}</div>
-    </section>
-  );
-}
-
-/** Rail tab "แผนงาน": consultant summary, mix, allocation, timeline, measurement, next actions. */
+/**
+ * Rail tab "แผนงาน": consultant summary (open), then mix, allocation, timeline, measurement and next actions, each
+ * collapsed behind a one-line preview (UI_CONTRACT §6 progressive disclosure).
+ */
 export function PlanPanel({ result, readOnly = false }: { result: FinalResult; readOnly?: boolean }) {
   const { plan } = result;
   const avatarFor = new Map(
     [...result.recommendations, ...result.addedFromChat].map((r) => [r.creatorId, r.avatarUrl] as const),
   );
   const timeline = [...plan.timeline].sort((a, b) => a.week - b.week);
+  const firstWeek = timeline[0];
+  const lastWeek = timeline[timeline.length - 1];
+  const soonest = [...result.nextActions].sort((a, b) => a.dueInDays - b.dueInDays)[0];
 
   return (
-    <div className="flex flex-col gap-4 text-body font-light text-text">
+    <div className="-my-2 flex flex-col divide-y divide-rule text-body font-light text-text">
       {result.consultantSummaryTh ? (
-        <Block title="สรุปจากที่ปรึกษา">
-          <p className="whitespace-pre-line">{result.consultantSummaryTh}</p>
-        </Block>
+        <Disclosure title="สรุปจากที่ปรึกษา" preview={previewTh(result.consultantSummaryTh)} defaultOpen>
+          <p className="max-w-[70ch] whitespace-pre-line">{result.consultantSummaryTh}</p>
+        </Disclosure>
       ) : null}
 
       {plan.mixTh ? (
-        <Block title="สัดส่วนครีเอเตอร์">
-          <p className="whitespace-pre-line">{plan.mixTh}</p>
-        </Block>
+        <Disclosure title="สัดส่วนครีเอเตอร์" preview={previewTh(plan.mixTh)}>
+          <p className="max-w-[70ch] whitespace-pre-line">{plan.mixTh}</p>
+        </Disclosure>
       ) : null}
 
       {plan.budgetAllocation.length > 0 ? (
-        <Block title="การจัดสรรงบ">
+        <Disclosure
+          title="การจัดสรรงบ"
+          preview={`${formatNumber(plan.budgetAllocation.length)} ครีเอเตอร์ · รวม ${formatTHBRange(plan.totals.feeTHB)}`}
+        >
           <ul className="divide-y divide-rule">
             {plan.budgetAllocation.map((a) => (
               <li key={a.creatorId} className="flex items-center gap-3 py-2">
@@ -58,15 +59,18 @@ export function PlanPanel({ result, readOnly = false }: { result: FinalResult; r
             <span className="font-normal">{formatTHBRange(plan.totals.feeTHB)}</span>
           </p>
           {plan.budgetFitTh ? <p className="mt-2 text-label text-muted">{plan.budgetFitTh}</p> : null}
-        </Block>
+        </Disclosure>
       ) : null}
 
-      {timeline.length > 0 ? (
-        <Block title="ไทม์ไลน์">
+      {firstWeek ? (
+        <Disclosure
+          title="ไทม์ไลน์"
+          preview={`${formatNumber(lastWeek?.week ?? firstWeek.week)} สัปดาห์ · เริ่มด้วย ${previewTh(firstWeek.titleTh, 48)}`}
+        >
           <ol className="flex flex-col gap-3">
             {timeline.map((w) => (
               <li key={`${w.week}-${w.titleTh}`} className="grid grid-cols-[72px_1fr] gap-3">
-                <span className="text-[13px] leading-[22px] text-muted tabular-nums">สัปดาห์ที่ {w.week}</span>
+                <span className="text-label text-muted tabular-nums">สัปดาห์ที่ {w.week}</span>
                 <div>
                   <p className="font-normal">{w.titleTh}</p>
                   {w.tasksTh.length > 0 ? (
@@ -80,22 +84,32 @@ export function PlanPanel({ result, readOnly = false }: { result: FinalResult; r
               </li>
             ))}
           </ol>
-        </Block>
+        </Disclosure>
       ) : null}
 
       {plan.measurementPlanTh.length > 0 ? (
-        <Block title="การวัดผล">
+        <Disclosure
+          title="การวัดผล"
+          preview={`${formatNumber(plan.measurementPlanTh.length)} ข้อ · ${previewTh(plan.measurementPlanTh[0] ?? '', 48)}`}
+        >
           <ul className="list-disc space-y-1 pl-4">
             {plan.measurementPlanTh.map((m) => (
               <li key={m}>{m}</li>
             ))}
           </ul>
-        </Block>
+        </Disclosure>
       ) : null}
 
-      <Block title="ขั้นตอนถัดไป">
+      <Disclosure
+        title="ขั้นตอนถัดไป"
+        preview={
+          soonest
+            ? `${formatNumber(result.nextActions.length)} รายการ · เริ่มที่ ${previewTh(soonest.titleTh, 48)}`
+            : 'ยังไม่มีขั้นตอนถัดไป'
+        }
+      >
         <NextActionList actions={result.nextActions} resultId={result.resultId} readOnly={readOnly} />
-      </Block>
+      </Disclosure>
     </div>
   );
 }

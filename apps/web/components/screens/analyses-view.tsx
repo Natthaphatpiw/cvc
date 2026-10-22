@@ -64,7 +64,7 @@ function destination(row: Row): { href: string; label: string } {
 
 function TableSkeleton() {
   return (
-    <div className="overflow-hidden rounded-card border border-border bg-surface" aria-busy="true" aria-label="กำลังโหลดรายการ">
+    <div className="overflow-hidden rounded-card border border-border bg-surface shadow-card" aria-busy="true" aria-label="กำลังโหลดรายการ">
       <div className="h-9 bg-raised" />
       {Array.from({ length: 5 }, (_, i) => (
         <div key={i} className="flex h-12 items-center gap-4 border-t border-rule px-4">
@@ -194,7 +194,7 @@ export function AnalysesView() {
       {state.kind === 'ready' && state.rows.length > 0 ? (
         <section aria-label="รายการการวิเคราะห์">
           <p className="mb-2 text-label text-muted">{state.rows.length.toLocaleString('en-US')} รายการ</p>
-          <div className="overflow-hidden rounded-card border border-border bg-surface">
+          <div className="overflow-hidden rounded-card border border-border bg-surface shadow-card">
             <div className="overflow-x-auto">
               <table className="w-full min-w-[320px] border-collapse text-left">
                 <thead>
@@ -302,7 +302,7 @@ function FirstRunGuide() {
       <h2 id="first-run-title" className="mb-2 text-section font-medium text-text">
         สิ่งที่จะได้จากการวิเคราะห์
       </h2>
-      <div className="grid grid-cols-1 gap-px overflow-hidden rounded-card border border-border bg-border md:grid-cols-3">
+      <div className="grid grid-cols-1 gap-px overflow-hidden rounded-card border border-border bg-border shadow-card md:grid-cols-3">
         {WHAT_YOU_GET.map((item) => (
           <div key={item.title} className="flex flex-col gap-1 bg-surface p-5">
             <h3 className="text-body font-normal text-text">{item.title}</h3>

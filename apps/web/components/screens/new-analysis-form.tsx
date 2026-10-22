@@ -6,7 +6,9 @@ import { TriangleAlert } from 'lucide-react';
 import {
   PERSONAS_SEED,
   RunInput,
+  type AudienceAssistResponse,
   type AudiencePersona,
+  type CampaignAssistResponse,
   type Objective,
   type RunAsset,
   type RunInputDraft,
@@ -18,8 +20,9 @@ import { formatNumber } from '@/lib/format';
 import { localStore } from '@/lib/local-store';
 import { useSession } from '@/lib/session';
 import { probeUploads, type UploadAvailability } from '@/lib/uploads';
+import { AiAssistBar, type AssistContext, type AssistFill } from '@/components/new/ai-assist-bar';
 import { MAX_PERSONAS, PersonaPicker } from '@/components/new/persona-picker';
-import { OBJECTIVES, ObjectiveControl, objectiveLabel } from '@/components/new/objective-control';
+import { ObjectiveControl, objectiveHint, objectiveLabel } from '@/components/new/objective-control';
 import { ScreenshotUploader } from '@/components/new/screenshot-uploader';
 import { VoiceInput, type VoiceValue } from '@/components/new/voice-input';
 import { Button } from '@/components/ui/button';
@@ -79,10 +82,35 @@ function parseBaht(raw: string): number | null | 'invalid' {
   return Number.isFinite(n) ? n : 'invalid';
 }
 
-function Section({ id, title, children }: { id: string; title: string; children: ReactNode }) {
+/** Assist context: a link only when it is valid and fits AssistRequest (500 chars); the agent treats it as a hint. */
+function contextUrl(raw: string, kind: UrlKind): string | null {
+  const url = normalizeUrl(raw, kind);
+  return url && url.length <= 500 && !urlError(url, kind) ? url : null;
+}
+
+type SectionProps = {
+  id: string;
+  title: string;
+  /** Marks the heading "(ไม่บังคับ)". */
+  optional?: boolean;
+  /** One muted line under the heading, e.g. what happens when the section is left empty. */
+  description?: string;
+  children: ReactNode;
+};
+
+function Section({ id, title, optional = false, description, children }: SectionProps) {
   return (
     <section aria-labelledby={id} className="mb-6">
-      <SectionHeading id={id} title={title} />
+      <SectionHeading
+        id={id}
+        title={
+          <>
+            {title}
+            {optional ? <span className="font-light text-muted"> (ไม่บังคับ)</span> : null}
+          </>
+        }
+      />
+      {description ? <p className="-mt-1.5 mb-2.5 text-label text-muted">{description}</p> : null}
       <Card>{children}</Card>
     </section>
   );
@@ -101,10 +129,11 @@ export function NewAnalysisForm() {
   const [tiktokUrl, setTiktokUrl] = useState('');
   const [personaIds, setPersonaIds] = useState<string[]>([]);
   const [audienceNotes, setAudienceNotes] = useState('');
-  const [objective, setObjective] = useState<Objective>('conversion');
+  // null = left to the agent ("ระบบเลือกให้" / "ระบบแนะนำให้"); the brand step picks a value from its analysis.
+  const [objective, setObjective] = useState<Objective | null>(null);
   const [budgetMin, setBudgetMin] = useState('');
   const [budgetMax, setBudgetMax] = useState('');
-  const [nCreators, setNCreators] = useState(5);
+  const [nCreators, setNCreators] = useState<number | null>(null);
   const [shots, setShots] = useState<{ assets: RunAsset[]; uploading: boolean }>({ assets: [], uploading: false });
   const [voice, setVoice] = useState<VoiceValue>({ asset: null, transcript: null, busy: false });
 
@@ -121,7 +150,11 @@ export function NewAnalysisForm() {
       .then((r) => (r.personas.length > 0 ? r.personas : PERSONAS_SEED))
       .catch(() => PERSONAS_SEED)
       .then((list) => {
-        if (active) setPersonas(list);
+        if (!active) return;
+        setPersonas(list);
+        // An assist that answered before the list loaded was checked against the seed: keep only ids shown here.
+        const known = new Set(list.map((p) => p.id));
+        setPersonaIds((ids) => (ids.every((id) => known.has(id)) ? ids : ids.filter((id) => known.has(id))));
       });
     return () => {
       active = false;
@@ -148,6 +181,51 @@ export function NewAnalysisForm() {
     setPersonaIds((list) =>
       list.includes(id) ? list.filter((x) => x !== id) : list.length >= MAX_PERSONAS ? list : [...list, id],
     );
+  };
+
+  const assistContext: AssistContext = {
+    companyName: companyName.trim() || null,
+    websiteUrl: contextUrl(websiteUrl, 'website'),
+    facebookUrl: contextUrl(facebookUrl, 'facebook'),
+  };
+
+  // Each fill replaces the section's values and returns an undo that restores exactly what was there before.
+  const fillAudience = (res: AudienceAssistResponse): AssistFill => {
+    const prev = { personaIds, audienceNotes };
+    const known = new Set((personas ?? PERSONAS_SEED).map((p) => p.id));
+    const ids = [...new Set(res.audience.personaIds)].filter((id) => known.has(id)).slice(0, MAX_PERSONAS);
+    setPersonaIds(ids);
+    setAudienceNotes(res.audience.audienceNotes.slice(0, 2000));
+    clearError('audienceNotes');
+    return {
+      noteTh: res.noteTh,
+      undo: () => {
+        setPersonaIds(prev.personaIds);
+        setAudienceNotes(prev.audienceNotes);
+      },
+    };
+  };
+
+  const fillCampaign = (res: CampaignAssistResponse): AssistFill => {
+    const prev = { objective, budgetMin, budgetMax, nCreators };
+    const { objective: nextObjective, budgetTHB, nCreators: nextCreators } = res.campaign;
+    setObjective(nextObjective);
+    // A null budget means the prompt named no amount: keep whatever the planner typed.
+    if (budgetTHB) {
+      setBudgetMin(formatNumber(Math.round(Math.min(budgetTHB.min, budgetTHB.max))));
+      setBudgetMax(formatNumber(Math.round(Math.max(budgetTHB.min, budgetTHB.max))));
+    }
+    setNCreators(nextCreators);
+    clearError('budget');
+    return {
+      noteTh: res.noteTh,
+      undo: () => {
+        setObjective(prev.objective);
+        setBudgetMin(prev.budgetMin);
+        setBudgetMax(prev.budgetMax);
+        setNCreators(prev.nCreators);
+      },
+    };
   };
 
   const busyUploading = shots.uploading || voice.busy;
@@ -247,11 +325,10 @@ export function NewAnalysisForm() {
   }
 
   const uploadsUnavailable = uploads === 'unavailable';
-  const objectiveHint = OBJECTIVES.find((o) => o.id === objective)?.hint;
   const summary = [
     companyName.trim() || 'ยังไม่ได้กรอกชื่อแบรนด์',
-    objectiveLabel(objective),
-    `${nCreators} ครีเอเตอร์`,
+    objective !== null ? objectiveLabel(objective) : 'เป้าหมาย: ระบบเลือกให้',
+    nCreators !== null ? `${nCreators} ครีเอเตอร์` : 'จำนวนครีเอเตอร์: ระบบแนะนำ',
     personaIds.length > 0 ? `${personaIds.length} กลุ่มลูกค้า` : null,
   ]
     .filter(Boolean)
@@ -321,8 +398,23 @@ export function NewAnalysisForm() {
           </div>
         </Section>
 
-        <Section id="new-sec-audience" title="กลุ่มลูกค้า">
+        <Section
+          id="new-sec-audience"
+          title="กลุ่มลูกค้า"
+          optional
+          description="ไม่กรอกก็ได้ ระบบจะวิเคราะห์กลุ่มลูกค้าจากเพจและเว็บไซต์ให้"
+        >
           <div className="grid gap-4">
+            <AiAssistBar
+              section="audience"
+              context={assistContext}
+              label="เล่าธุรกิจสั้นๆ ให้ AI ช่วยกรอก"
+              placeholder="เล่าสั้นๆ ว่าขายอะไร ให้ใคร เช่น บริษัทขายอาหารเพื่อสุขภาพ เน้นมื้อเช้า"
+              buttonLabel="ให้ AI ช่วยกรอกกลุ่มลูกค้า"
+              hint="AI จะเลือกกลุ่มลูกค้าและเขียนคำอธิบายให้ แก้ต่อได้ก่อนเริ่มวิเคราะห์"
+              onFill={fillAudience}
+              className="border-b border-rule pb-4"
+            />
             <Field
               group
               label="ลูกค้าที่อยากได้เป็นใคร (เลือกได้หลายข้อ)"
@@ -346,8 +438,23 @@ export function NewAnalysisForm() {
           </div>
         </Section>
 
-        <Section id="new-sec-campaign" title="แคมเปญ">
+        <Section
+          id="new-sec-campaign"
+          title="แคมเปญ"
+          optional
+          description="ไม่เลือกก็ได้ ระบบจะเลือกเป้าหมายที่เหมาะกับแบรนด์ให้"
+        >
           <div className="grid gap-5">
+            <AiAssistBar
+              section="campaign"
+              context={assistContext}
+              label="เล่าแคมเปญที่อยากได้ ให้ AI ช่วยกรอก"
+              placeholder="เช่น อยากได้แคมเปญที่เหมาะกับสินค้าที่เน้นสร้างแบรนด์ งบราว 2 แสน"
+              buttonLabel="ให้ AI ช่วยกรอกแคมเปญ"
+              hint="AI จะเลือกเป้าหมายและจำนวนครีเอเตอร์ให้ ถ้าบอกงบมาด้วยจะใส่งบให้ แก้ต่อได้ก่อนเริ่มวิเคราะห์"
+              onFill={fillCampaign}
+              className="border-b border-rule pb-5"
+            />
             <div>
               <p id={objectiveLabelId} className="mb-2 text-label font-normal text-text">
                 เป้าหมายของแคมเปญ
@@ -359,7 +466,7 @@ export function NewAnalysisForm() {
                 describedBy={objectiveHintId}
               />
               <p id={objectiveHintId} className="mt-1.5 text-meta text-muted">
-                {objectiveHint}
+                {objectiveHint(objective)}
               </p>
             </div>
 
@@ -431,8 +538,19 @@ export function NewAnalysisForm() {
               )}
             </fieldset>
 
-            <Field label="จำนวนครีเอเตอร์ที่ต้องการ" hint="แนะนำ 3–5 คนสำหรับแคมเปญแรก" className="max-w-[200px]">
-              <Select value={nCreators} onChange={(e) => setNCreators(Number(e.currentTarget.value))}>
+            <Field
+              label="จำนวนครีเอเตอร์ที่ต้องการ"
+              hint={nCreators !== null ? 'แนะนำ 3–5 คนสำหรับแคมเปญแรก' : 'ระบบจะแนะนำจำนวนที่เหมาะกับเป้าหมายและงบให้'}
+              className="max-w-[240px]"
+            >
+              <Select
+                value={nCreators ?? ''}
+                onChange={(e) => {
+                  const v = e.currentTarget.value;
+                  setNCreators(v ? Number(v) : null);
+                }}
+              >
+                <option value="">ระบบแนะนำให้</option>
                 {Array.from({ length: 10 }, (_, i) => i + 1).map((n) => (
                   <option key={n} value={n}>
                     {n} คน

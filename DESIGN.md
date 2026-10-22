@@ -1,12 +1,13 @@
 # DESIGN.md — TikTok KOL Matcher (Convert Cake look & feel)
 
-> **Version:** 1.3 · **Date:** 2026-10-21 · ใช้คู่กับ [`SYSTEM_DESIGN.md`](./SYSTEM_DESIGN.md) และ [`docs/UI_CONTRACT.md`](./docs/UI_CONTRACT.md)
+> **Version:** 1.4 · **Date:** 2026-10-22 · ใช้คู่กับ [`SYSTEM_DESIGN.md`](./SYSTEM_DESIGN.md) และ [`docs/UI_CONTRACT.md`](./docs/UI_CONTRACT.md)
 > design system + UI/UX spec ของ Web (`apps/web`) และ LINE LIFF · อธิบาย UI ที่สร้างแล้วจริง · source of truth สำหรับนักพัฒนาและ AI coding agent
 >
 > **สัญญาที่มีผลบังคับ:** [`docs/UI_CONTRACT.md`](./docs/UI_CONTRACT.md) คือกฎ UI ที่ผูกพันทุกหน้าจอใน `apps/web` — **ถ้าเอกสารนี้ขัดกับ UI_CONTRACT ให้ยึด UI_CONTRACT** · เอกสารนี้ขยายความ (ที่มาของค่า, การ map จาก `FinalResult`, copy, states) และบันทึกสิ่งที่สร้างแล้ว/ยังไม่สร้าง
 >
 > **ที่มาของค่า:** **B** = ค่าที่ใช้จริงใน `apps/web` (`app/globals.css`, components) ตาม UI_CONTRACT · **C** = ดึงจาก CSS จริงของ convertcake.com (WordPress/Elementor kit `post-24.css` + theme `main.css`) · **I** = sample จาก pixel ของ logo/ภาพโฆษณา · **E** = ค่าที่เราออกแบบ/ปรับเพิ่ม
 > **เครื่องหมายการค้า:** โลโก้และชื่อ Convert Cake เป็นของ Convert Cake Co., Ltd. · prototype ต้องติดป้าย "Concept prototype for Convert Cake assessment" (ยังไม่แสดงใน `apps/web` — ดู §9.16) · ห้าม hotlink asset จากเว็บ CVC ใน production (ขอไฟล์ SVG ทางการ) · ในแอปใช้ product mark ที่วาดเอง (§6.1) ไม่ใช้โลโก้ CVC
+> **v1.4 (ทิศทางใหม่, UI_CONTRACT v2):** โทน SaaS สว่างและเป็นมิตร (อ้างอิง Invo dashboard + Homespot) — พื้นฟ้าเทาอ่อน `#F3F6FD`, การ์ดขาวมุม 16px เงาอ่อน (`shadow-card`), น้ำเงินสด `#1D5BFF` คู่กับ cyan `#0894B4`, nav ที่ active เป็น pill น้ำเงินทึบตัวอักษรขาว, gradient ใช้ได้เฉพาะผ่าน token (`bg-hero` บน hero/สรุปที่ AI เขียน, `bg-brand-grad` บนปุ่ม AI, `text-brand-grad` คำเน้นสั้นๆ), ไอคอน sparkle (`AiSparkleIcon`) เฉพาะปุ่มสั่ง AI และสรุปที่ AI เขียน, badge ทรง pill (+ tone `info`), sidebar ขาว 248px ย่อเป็น rail ไอคอน 76px ได้ (จำค่าใน `localStorage`), `<main>` เป็น container `main`, progressive disclosure ด้วย `Disclosure` · ส่วนใดในเอกสารนี้ที่ยังเขียนแบบ v1.3 ให้ยึด UI_CONTRACT
 > **v1.3:** ปรับให้ตรงกับ UI ที่สร้างแล้วและ UI_CONTRACT — ฟอนต์ Mitr อย่างเดียว, สีแบบ accent ladder (เลิก gradient / glass / glow / CTA card / hero พื้นเข้ม / ไอคอนในกรอบหมุน / cyan), shell แบบ open plane (sidebar 240px, ไม่มี top bar บน desktop), ปุ่ม/ช่องกรอก 36px (มือถือ 44px), signature elements ที่สร้างจริง (รูปครีเอเตอร์, fit strip, expected-views bullet, ป้ายความมั่นใจ/สมมติฐาน, KPI strip), ตารางครีเอเตอร์แทน KolCard, creator sheet 5 แท็บ, แผนงาน, แชท, หน้าจอตาม route จริง, ไม่มี emoji และเครื่องหมายอัศเจรีย์
 > **v1.2:** ประกาศความเป็นส่วนตัวก่อนอัปโหลดแรก (รายชื่อผู้ประมวลผลครบ), ลบผลลัพธ์ถาวร vs นำออกจากที่บันทึก, opt-out 2 ขั้น + คิว admin, `addedFromChat`/`redactedCreators`, relax 2 แบบ, copy LINE push = Phase 2, เวลา 5–9 นาที
 > **v1.1:** แก้ contrast ของ semantic colors, แก้ป้าย C/E ให้ตรง CSS จริง, tokens ครบ, เพิ่มหน้าจอ P10–P14, ShareDialog, สถานะ narrative-pending/what-if, ปุ่มยกเลิก, ประกาศความเป็นส่วนตัวใต้ CTA, เปลี่ยนรหัสหน้าจอเป็น P* (ไม่ชนกับ spike SP* ใน SYSTEM_DESIGN)
@@ -41,8 +42,8 @@
 | 2 | **Explainable by default** | ทุกคะแนนดู "ทำไม" ได้ (fit strip + ตารางคะแนนรายกลุ่ม) · ทุกตัวเลขมีแหล่งที่มา วันที่ ความมั่นใจ · ค่าคาดการณ์แสดงเป็นช่วงและติดป้ายเสมอ · ข้อมูลที่ขาดแสดงชัด |
 | 3 | **Thai-first** | copy ภาษาไทยก่อน ปนศัพท์วงการ (ER, CPV, Conversion) · ใน UI เรียก "ครีเอเตอร์" (KOL ใช้ในชื่อโปรเจกต์/เอกสารเท่านั้น) · ฟอนต์ Mitr รองรับวรรณยุกต์ซ้อน |
 | 4 | **Tool, not a landing page** | ผู้ใช้เปิดมาเจอหน้าที่ทำงานได้ทันที (ตารางการวิเคราะห์ + ปุ่มเดียว) · ไม่มี hero, ไม่มี marketing copy บนหน้าทำงาน · desktop = sidebar + ตาราง + rail แผนงาน/แชท · มือถือ/LIFF = top bar 48px + คอลัมน์เดียว ปุ่มสูง 44px |
-| 5 | **Progressive disclosure** | สรุปก่อน (KPI strip, ตาราง) รายละเอียดใน creator sheet · ระหว่างวิเคราะห์เห็นผลทีละส่วน (stage → brand card → จำนวนผู้เข้าเกณฑ์ → ตัวอย่างครีเอเตอร์) |
-| 6 | **On-brand แบบ accent ladder** | น้ำเงิน Convert Cake `#0536D2` บนเครื่องหมายเล็กเท่านั้น · พื้นที่ใช้ tint อ่อน · พื้นการ์ดขาว ขอบ 1px ไม่มีเงา · light theme อย่างเดียว · ไม่มี gradient / glass / glow |
+| 5 | **Progressive disclosure** | สรุปก่อน (hero สรุปแบรนด์, KPI cards, ตาราง) รายละเอียดเปิดเมื่อต้องการ (`Disclosure` ปิดไว้พร้อมพรีวิวหนึ่งบรรทัด, accordion ต่อแถว, creator sheet) · ไม่มีเนื้อหาใดถูกตัดทิ้ง · ระหว่างวิเคราะห์เห็นผลทีละส่วน (stage → brand card → จำนวนผู้เข้าเกณฑ์ → ตัวอย่างครีเอเตอร์) |
+| 6 | **สว่าง เป็นมิตร อ่านง่าย** | น้ำเงินสด `#1D5BFF` บนปุ่มหลัก nav ที่ active ข้อมูล และสถานะที่เลือก · พื้นที่ใช้ tint อ่อน · การ์ดขาวมุม 16 เงาอ่อน · gradient เฉพาะ token บน hero/AI · light theme อย่างเดียว · ไม่มี glass / glow / gradient เคลื่อนไหว |
 | 7 | **Never show a number we did not compute** | ตัวเลขทั้งหมดมาจาก code ไม่ใช่ LLM · ข้อมูลตัวอย่างติดป้ายเสมอ (demo banner + `isDemo`) · สมมติฐานที่ยังไม่ปรับเทียบติดป้าย "สมมติฐาน" |
 
 ---
@@ -51,65 +52,72 @@
 
 - **Company:** Convert Cake — performance marketing agency ในกรุงเทพฯ (ก่อตั้ง 2018, ~60 คน) · tagline **"We make conversions a piece of cake."** · Google Premier Partner, Meta Business Partner, **TikTok Agency Partner**
 - **Visual DNA ของเว็บ CVC (อ้างอิง):** electric/royal blue เป็นสีหลัก, navy สำหรับหัวข้อใหญ่, cyan glow, หัวข้อ two-tone, CTA การ์ดน้ำเงินมี glow + ไอคอนในกรอบหมุน 45°, diamond bullet, stat callout แบบ speech bubble, social ads แบบ gradient/glass/ตัวอักษรเรืองแสง
-- **สิ่งที่ผลิตภัณฑ์นี้รับมา:** น้ำเงิน `#0536D2` (C) เป็น accent เดียว และเฉดอ่อนของมัน (`#C8D4FB`, `#04299E` จาก CSS ของ CVC) · ความตรงไปตรงมาแบบ performance
-- **สิ่งที่ไม่ใช้ (v1.3):** gradient, glass, glow, CTA card, hero พื้นเข้ม, ไอคอนในกรอบหมุน 45°, diamond bullet, speech-bubble callout, หัวข้อ two-tone, cyan accent, navy headline, ฟอนต์ Manrope/Noto Sans Thai/Prompt — เพราะเป็นภาษาของหน้าโฆษณา ไม่ใช่เครื่องมือที่เปิดใช้ทุกวัน (UI_CONTRACT §1–2)
+- **สิ่งที่ผลิตภัณฑ์นี้รับมา (v1.4):** น้ำเงินสดตระกูลเดียวกับ royal blue ของ CVC (`#1D5BFF`) และ cyan (`#0894B4`, ในไอคอน AI `#3DD9FF`) ซึ่งตรงกับ cyan glow ของเว็บ CVC แต่ใช้แบบนุ่ม (tint และ gradient token) · ความตรงไปตรงมาแบบ performance
+- **สิ่งที่ไม่ใช้:** glass, glow, gradient เคลื่อนไหว, CTA card, hero พื้นเข้มหรือ hero แบบการตลาด, ไอคอนในกรอบหมุน 45°, diamond bullet, speech-bubble callout, หัวข้อ two-tone, navy headline, ฟอนต์ Manrope/Noto Sans Thai/Prompt — เพราะเป็นภาษาของหน้าโฆษณา ไม่ใช่เครื่องมือที่เปิดใช้ทุกวัน (UI_CONTRACT §1–2) · gradient ใช้ได้เฉพาะ token ที่ประกาศใน `globals.css`
 - **Logo:** โลโก้ CVC ทางการ (mark #3A4EFF + wordmark navy #000E3E) ใช้ได้เฉพาะไฟล์ทางการ · ห้ามสร้าง wordmark ด้วยฟอนต์ · ในแอปใช้ **product mark** ที่วาดเอง (วงกลมสองวงซ้อนกัน = แบรนด์กับครีเอเตอร์ "match", §6.1) คู่กับข้อความ "Convert Cake · Influencer"
 
 ---
 
 ## 3. Color
 
-### 3.1 Accent ladder (หนึ่ง hue: Convert Cake blue)
+### 3.1 Accent: น้ำเงินสด + cyan คู่กัน
 
 | Token | Hex | Src | ใช้กับ |
 |---|---|---|---|
-| `--accent` | `#0536D2` | C | **เครื่องหมายเล็กเท่านั้น:** ปุ่ม filled ปุ่มเดียวของหน้าจอ, data series (fill ของ fit strip, tick p50, progress bar), ไอคอน nav ที่ active, ลิงก์, focus ring, checkbox ที่เลือก, ไอคอน stage ที่เสร็จ |
-| `--accent-hover` | `#042CB0` | B | hover ของปุ่ม filled |
-| `--accent-soft` | `#EEF2FE` | B | พื้นที่: แถว nav ที่ active, แถวตารางที่เลือก, badge accent, persona chip ที่เลือก, user message ในแชท, initials ของ avatar |
-| `--accent-track` | `#E3E9FD` | B | track ของ progress bar, fit strip, expected-views bullet |
-| `--accent-line` | `#C8D4FB` | C (`blue-200`) | ช่วง p25–p75 ของ expected-views bullet, กรอบ persona chip ที่เลือก, กรอบ notice แบบ accent |
-| `--accent-ink` | `#04299E` | C (`blue-700`) | ข้อความบน `--accent-soft` / `--accent-track` |
+| `--accent` | `#1D5BFF` | E | ปุ่ม primary, pill ของ nav ที่ active, data series (fill ของ fit strip, tick p50, progress bar), ลิงก์, focus ring, checkbox/สถานะที่เลือก · ตัวอักษรขาวบนพื้นนี้ 5.3:1 |
+| `--accent-hover` | `#1449E0` | E | hover ของปุ่ม primary |
+| `--accent-soft` | `#EAF0FF` | E | พื้นที่: แถวตารางที่เลือก, badge accent, persona chip ที่เลือก, user message ในแชท, initials ของ avatar, tile ไอคอนของ KPI, แผงสรุปที่ AI เขียน |
+| `--accent-track` | `#DCE6FF` | E | track ของ progress bar, fit strip, expected-views bullet, `::selection` |
+| `--accent-line` | `#BFD0FF` | E | ช่วง p25–p75 ของ expected-views bullet, กรอบ persona chip ที่เลือก, กรอบ notice แบบ accent |
+| `--accent-ink` | `#0B3BC4` | E | ข้อความบน `--accent-soft` / `--accent-track`, label ของ tab ที่เลือก, tick มัธยฐานอ้างอิง |
+| `--info` / `--info-soft` / `--info-ink` | `#0894B4` / `#E3F7FC` / `#086F88` | E | cyan คู่หู: badge "ระบบวิเคราะห์ให้" / "ระบบเลือกให้" (`info`), เครื่องหมายข้อมูลรอง · `--info` ใช้กับเครื่องหมาย/ไอคอนเท่านั้น ข้อความใช้ `--info-ink` |
 
-- **Colour budget:** 3–10% ของจอ เกือบทั้งหมดเป็นพื้นที่ `--accent-soft`/`--accent-track` · ใช้ `--accent` เต็มเฉดเฉพาะเครื่องหมายเล็ก · **ห้ามเทพื้นที่ใหญ่ด้วย `--accent`** (ไม่มี hero/แบนเนอร์/การ์ดน้ำเงินทึบ)
-- ห้าม violet / indigo / purple และห้ามน้ำเงินเฉดอื่นปน
-- **ค่าแบรนด์ CVC อื่น (อ้างอิงเท่านั้น ไม่ใช้ใน UI):** `#3A4EFF` (logo mark, I), `#063DEF` (royal, I), `#597EF3`, `#E3E8FF`, `#E6ECFD`, `#163BB0`, `#031B69`, navy `#000E41`/`#041038`, cyan `#5BFCF4`/`#5CEEEE` (C)
+- **การใช้สี:** พื้นหลังสงบ (ฟ้าเทาอ่อน + การ์ดขาว) ใช้สีกับความหมาย · `--accent` ทึบบนปุ่มหลัก pill nav เครื่องหมายข้อมูลและสถานะที่เลือก · พื้นที่ใช้ tint อ่อน · **ห้ามเทการ์ดหรือ section ด้วย `--accent` หรือ `bg-brand-grad`** · `bg-hero` คือพื้นที่ใหญ่ที่มีสีได้แบบเดียว
+- ห้าม violet / indigo / purple เป็น hue (lilac/peach อยู่ได้เฉพาะใน `--grad-hero` ที่ alpha ต่ำ)
+- **ค่าแบรนด์ CVC อื่น (อ้างอิงเท่านั้น ไม่ใช้ใน UI):** `#0536D2` (accent v1.3), `#3A4EFF` (logo mark, I), `#063DEF` (royal, I), `#597EF3`, `#E3E8FF`, `#E6ECFD`, `#163BB0`, `#031B69`, navy `#000E41`/`#041038`, cyan `#5BFCF4`/`#5CEEEE` (C)
 
 ### 3.2 Neutrals & semantic tokens
 
 | Token | Hex | Src | ใช้กับ |
 |---|---|---|---|
-| `--ground` | `#F7F8FC` | B | พื้นหลังหน้า (และ sidebar ซึ่งไม่มี fill ของตัวเอง) · `themeColor` ของ viewport |
-| `--surface` | `#FFFFFF` | B | การ์ด, ตัวตาราง, sheet, dialog, toast, tooltip |
-| `--raised` | `#F2F4F8` | B | hover ของแถว/ปุ่ม secondary, header row ของตาราง, skeleton, track ของ segmented control, demo banner |
-| `--border` | `#E6E8EF` | B | ขอบ 1px ของการ์ดและ container, hairline ของ sidebar |
-| `--rule` | `#EEF0F5` | B | เส้นคั่นแถวในการ์ด, baseline ของ tabs |
-| `--control` | `#D3D7E2` | B | ขอบ input/ปุ่ม secondary, กรอบประของ empty state/dropzone, พื้นปุ่ม primary ที่ disabled |
-| `--text` | `#111827` | B | ข้อความหลักและตัวเลข, tick มัธยฐานของ fit strip, เส้นใต้ tab ที่ active |
-| `--muted` | `#5F6672` | B | label, ข้อความรอง, meta, ไอคอน nav ปกติ, tick มัธยฐานของ tier ใน bullet |
-| `--subtle` | `#8A90A0` | B | placeholder, disabled, ไอคอน stage ที่ข้าม |
-| `--positive` / `--positive-soft` | `#1F7A4D` / `#E7F6EE` | B | ดีกว่า benchmark, อยู่ในงบ, เสร็จแล้ว, ความมั่นใจสูง, "ควรทำ" |
-| `--negative` / `--negative-soft` | `#C4242A` / `#FDECEC` | B | ไม่สำเร็จ, เกินงบ, error, ช่องกรอกผิด, "ไม่ควรทำ", ปุ่ม danger |
-| `--warning` / `--warning-soft` | `#8A4B08` / `#FFF6E5` | B | สมมติฐาน, ความมั่นใจต่ำ, ผลบางส่วน, ความเสี่ยง, รอตรวจ |
+| `--ground` | `#F3F6FD` | E | พื้นหลังหน้า · `themeColor` ของ viewport |
+| `--surface` | `#FFFFFF` | B | การ์ด, sidebar, top bar มือถือ, ตัวตาราง, sheet, dialog, toast, tooltip |
+| `--raised` | `#EEF3FC` | E | hover ของแถว/ปุ่ม secondary, header row ของตาราง, skeleton, track ของ segmented control, demo banner |
+| `--border` | `#E1E7F5` | E | ขอบ 1px ของการ์ดและ container, ขอบขวาของ sidebar |
+| `--rule` | `#EAEFF8` | E | เส้นคั่นแถวในการ์ด, baseline ของ tabs |
+| `--control` | `#CFD8EA` | E | ขอบปุ่ม secondary, กรอบประของ empty state/dropzone, พื้นปุ่ม primary ที่ disabled · ขอบช่องกรอกใช้ `--input` `#8590AB` (3.19:1) และ placeholder `--placeholder` `#67728B` (4.82:1) |
+| `--text` | `#0F172A` | E | ข้อความหลักและตัวเลข (17.9:1 บนขาว) |
+| `--muted` | `#55607A` | E | label, ข้อความรอง, meta, ไอคอนและ label ของ nav ปกติ (6.3:1 บนขาว, 5.8:1 บน ground) |
+| `--subtle` | `#8792AB` | E | disabled, ไอคอน stage ที่ข้าม, track ของ switch ที่ปิด (3.1:1 — ไม่ใช้กับข้อความที่ต้องอ่าน) |
+| `--positive` / `--positive-soft` | `#127A4A` / `#E7F7EF` | E | ดีกว่า benchmark, อยู่ในงบ, เสร็จแล้ว, ความมั่นใจสูง, "ควรทำ" |
+| `--negative` / `--negative-soft` | `#C62A2F` / `#FEECED` | E | ไม่สำเร็จ, เกินงบ, error, ช่องกรอกผิด, "ไม่ควรทำ", ปุ่ม danger |
+| `--warning` / `--warning-soft` | `#8F4C00` / `#FFF5E1` | E | สมมติฐาน, ความมั่นใจต่ำ, ผลบางส่วน, ความเสี่ยง, รอตรวจ |
 | `--line-green` / hover | `#06C755` / `#05B34C` | C (LINE) | **ปุ่มเข้าสู่ระบบด้วย LINE เท่านั้น** (LINE brand guideline, §6.2) |
-| `--overlay` | `rgb(17 24 39 / .32)` | B | ฉากหลังของ sheet/dialog |
+| `--overlay` | `rgb(15 23 42 / .36)` | E | ฉากหลังของ sheet/dialog |
 
-### 3.3 Gradients & special surfaces — ไม่ใช้แล้ว
+### 3.3 Gradients & special surfaces (v1.4: เฉพาะ token)
 
-ยกเลิกทั้งหมดใน v1.3 (UI_CONTRACT §2): `--grad-cta`, `--grad-border`, `--grad-scrim`, `--grad-section`, `--grad-hero`, `.glass`, `.glow-pill`, `--shadow-cta`, ตัวอักษรเรืองแสง, พื้นหลังเคลื่อนไหว, blob ตกแต่ง
+| Token → utility | ค่า | ใช้ได้ที่ |
+|---|---|---|
+| `--grad-hero` → `bg-hero` | blob แบบ radial 4 จุด (cyan, lilac, peach, น้ำเงิน) alpha 10–22% บนพื้นขาว | การ์ด hero ของหน้าผลลัพธ์ (สรุปแบรนด์) และพื้นผิวสรุปที่ AI เขียน · ข้อความบนพื้นนี้ผ่าน AA |
+| `--grad-brand` → `bg-brand-grad` | `linear-gradient(135deg, #0A6FC2, #1D5BFF)` | ปุ่ม `variant="ai"` เท่านั้น · ข้อความ/ไอคอนขาวบนทุกจุด ≥ 5.2:1 (จึงเริ่มที่ `#0A6FC2` ไม่ใช่ cyan อ่อน) |
+| `--grad-brand` → `text-brand-grad` | ตัวอักษร gradient (fallback `--accent`) | คำเน้นสั้นๆ หรือตัวเลขเดียว ไม่ใช่ประโยค |
 
-พื้นผิวที่ใช้มีแค่: `--ground` (หน้า) → `--surface` ขาว + ขอบ 1px `--border` (การ์ด) → `--raised` (header/hover) · layer ลอย (sheet, dialog, toast, tooltip) ใช้ `--shadow-float` + `--overlay` (§5.3)
+- gradient อื่นทั้งหมดยังห้าม (inline style, `bg-gradient-*`, `from-*`) · ไม่มี glass, blur panel, glow, ตัวอักษรเรืองแสง, พื้นหลังเคลื่อนไหว · gradient ไม่เคยเคลื่อนไหว
+- ไอคอน AI (`AiSparkleIcon`) ใช้ gradient ของตัวเองใน SVG (`#3DD9FF` → `#1D5BFF`) · บนปุ่ม AI ใช้ `tone="current"` (สีขาว)
+- พื้นผิว: `--ground` (หน้า) → `--surface` ขาว + ขอบ 1px `--border` + `shadow-card` (การ์ด) → `--raised` (header/hover) · layer ลอย (sheet, dialog, toast, tooltip) ใช้ `shadow-float` + `--overlay` (§5.3)
 
 ### 3.4 Data visualization
 
-ใช้ hue เดียว ไม่มีพาเลตต์หลายสี (ยกเลิก `viz-2` teal, `viz-3` amber, `viz-4` violet)
+ใช้ตระกูลน้ำเงินเป็นหลัก (`--info` cyan เป็นสีรองได้เมื่อจำเป็น) ไม่มีพาเลตต์หลายสี (ยกเลิก `viz-2` teal, `viz-3` amber, `viz-4` violet)
 
 | องค์ประกอบ | สี | ใช้ใน |
 |---|---|---|
 | ค่าของครีเอเตอร์ (fill / tick หลัก) | `--accent` | fit strip, tick p50 ของ bullet, progress bar |
 | track | `--accent-track` | fit strip, bullet, progress bar, แถบอัปโหลด |
 | ช่วงคาดการณ์ p25–p75 | `--accent-line` | expected-views bullet |
-| มัธยฐานของกลุ่มที่ประเมิน (pool median) | `--text` tick 1px | fit strip |
-| มัธยฐานของ tier | `--muted` tick 1px | expected-views bullet |
+| มัธยฐานของกลุ่มที่ประเมิน (pool median) | `--accent-ink` tick 1px | fit strip |
+| มัธยฐานของ tier | `--accent-ink` tick 1px | expected-views bullet |
 
 - **ไม่ใช้:** sparkline, donut/score ring, gauge, carousel ของกราฟ, chart library
 - แดง/เขียวใช้เฉพาะสถานะ (อยู่ในงบ/เกินงบ, อันดับขึ้น/ลงใน what-if) และมีข้อความกำกับเสมอ (เช่น `+2`, `−1`, "เกินงบ") · ไม่ใช้แดง/เขียวกับคะแนนรวม
@@ -181,11 +189,11 @@ Mitr หนาโดยธรรมชาติ จึงใช้ weight เบ
 **Desktop ≥ 1024px**
 
 ```
-┌─ sidebar 240px (พื้น --ground, hairline 1px ขวา) ─┬─ canvas (fluid, gutter 32px, content ≤ 1280px) ──────────┐
-│ (mark) Convert Cake                              │ ชื่อหน้า 24/500                         [ปุ่มหลัก 1 ปุ่ม] │
+┌─ sidebar 248px (พื้นขาว, ขอบ 1px ขวา) ────────────┬─ canvas (--ground, gutter 32px, content ≤ 1280px) ──────┐
+│ (mark) Convert Cake                      [ย่อ]   │ ชื่อหน้า 24/500                         [ปุ่มหลัก 1 ปุ่ม] │
 │        Influencer                                │ คำอธิบาย 1 บรรทัด 14/300 muted                            │
 │                                                  │                                                         │
-│ [icon] วิเคราะห์          ← active: accent-soft   │  เนื้อหา (ตาราง / การ์ด)                                  │
+│ [icon] วิเคราะห์    ← active: pill --accent ตัวขาว  │  เนื้อหา (การ์ดขาวมุม 16 เงาอ่อน)                          │
 │ [icon] วิเคราะห์ใหม่                               │                                                         │
 │ [icon] ที่บันทึกไว้                                │                                                         │
 │                                                  │                                                         │
@@ -198,17 +206,18 @@ Mitr หนาโดยธรรมชาติ จึงใช้ weight เบ
 
 | เรื่อง | ค่า (built) |
 |---|---|
-| Sidebar | 240px, `sticky top-0 h-svh`, ไม่มี fill, `border-r` 1px `--border`, padding 16/8 · **ไม่มี top bar บน desktop** |
-| Workspace block | product mark 20px + "Convert Cake" (13/400) / "Influencer" (13/300 muted) · ลิงก์ไป `/` |
-| Nav rows | สูง 32px (มือถือ 44px), ระยะ 34px, radius 6, padding ข้าง 8, ไอคอน lucide 16px stroke 1.5 สี `--muted`, label 14/300 · hover `--raised` |
-| Active row | พื้น `--accent-soft`, label `--accent-ink` 400, ไอคอน `--accent` · ไม่มีแถบซ้าย · `aria-current="page"` |
+| Sidebar | 248px (ย่อเป็น rail 76px), `sticky top-0 h-svh`, พื้น `--surface`, `border-r` 1px `--border`, padding 20/16 · **ไม่มี top bar บน desktop** |
+| Workspace block | product mark 22px + "Convert Cake" (13/400) / "Influencer" (13/300 muted) · ลิงก์ไป `/` · ปุ่มย่อ/ขยาย (`PanelLeftClose`/`PanelLeftOpen` 36px, "ย่อแถบเมนู"/"ขยายแถบเมนู" + tooltip) อยู่แถวเดียวกัน |
+| Nav rows | สูง 44px, ระยะ 48px, radius 10, ไอคอน lucide 18px stroke 1.75 สี `--muted`, label 14/300 · hover `--raised` |
+| Active row | pill `--accent` ทึบ, label และไอคอนสีขาว 400 · ไม่มีแถบซ้าย · `aria-current="page"` |
+| Rail (ย่อ) | 76px: ไอคอน, mark และ avatar อยู่บนเส้นกึ่งกลางเดียวกันทั้งสองสถานะ · label ซ่อนแบบ sr-only (ยังเป็นชื่อของลิงก์) + tooltip ด้านขวาเมื่อ hover/focus · user row เหลือ avatar (ลิงก์ไป `/account`) · จำค่าใน `localStorage['cvc:sidebar-collapsed']` · inline script ใน `app/layout.tsx` ตั้ง `<html data-sidebar="collapsed">` ก่อน paint (ไม่กระพริบ) · ความกว้างเปลี่ยนแบบ transition 200ms (ปิดเมื่อ reduced motion) · เมนูมือถือไม่ย่อ |
 | Nav items | วิเคราะห์ (`/`, active ด้วยบน `/runs/*`, `/results/*`) · วิเคราะห์ใหม่ (`/new`) · ที่บันทึกไว้ (`/saved`) · กลุ่ม "บัญชี": บัญชี (`/account`) · user row ปักไว้ล่างสุด เหนือเส้นคั่น |
-| User row | LINE: รูป 32 + ชื่อ + "เชื่อมต่อ LINE แล้ว" · guest: "ผู้ใช้ทั่วไป" + ปุ่มข้อความ "เข้าสู่ระบบด้วย LINE" (สี accent) หรือ "ข้อมูลเก็บในเบราว์เซอร์นี้" ถ้าไม่ได้ตั้งค่า LINE |
+| User row | LINE: รูป 32 + ชื่อ + "เชื่อมต่อ LINE แล้ว" · guest: ไอคอนคนในวงกลม 32 + "ผู้ใช้ทั่วไป" + ปุ่มข้อความ "เข้าสู่ระบบด้วย LINE" (สี accent) หรือ "ข้อมูลเก็บในเบราว์เซอร์นี้" ถ้าไม่ได้ตั้งค่า LINE |
 | Canvas | `max-width` 1344px รวม padding 32px → เนื้อหา ≤ 1280px · หัวหน้าเริ่มห่างด้านบน 32px · skip link "ข้ามไปเนื้อหาหลัก" |
 
 **< 1024px (มือถือและแท็บเล็ต)**
 
-- top bar สูง **48px** sticky พื้น `--ground` เส้นล่าง 1px: ปุ่มเมนู 44×44 (`aria-label="เปิดเมนู"`) · ชื่อหน้า 16/500 (การวิเคราะห์ / วิเคราะห์ใหม่ / ความคืบหน้า / ผลวิเคราะห์ / ที่บันทึกไว้ / บัญชี) · action เดียว: ไอคอน "วิเคราะห์แบรนด์ใหม่" (ซ่อนบน `/new`)
+- top bar สูง **48px** sticky พื้น `--surface` เส้นล่าง 1px: ปุ่มเมนู 44×44 (`aria-label="เปิดเมนู"`) · ชื่อหน้า 16/500 (การวิเคราะห์ / วิเคราะห์ใหม่ / ความคืบหน้า / ผลวิเคราะห์ / ที่บันทึกไว้ / บัญชี) · action เดียว: ไอคอน "วิเคราะห์แบรนด์ใหม่" (ซ่อนบน `/new`)
 - เมนูเปิดเป็น **sheet เต็มจอ** ที่มีเนื้อหาเดียวกับ sidebar (แถว nav สูง 44px) · ปิดเองเมื่อเปลี่ยนหน้า
 - เนื้อหาเต็มกว้าง margin 16px (< 640) / 24px (640–1023), เริ่มห่าง top bar 20px
 
@@ -216,7 +225,7 @@ Mitr หนาโดยธรรมชาติ จึงใช้ weight เบ
 
 | Token | Value | Src |
 |---|---|---|
-| Breakpoints | Tailwind ค่าเริ่มต้น: `sm 640` (ขนาดปุ่ม/ช่องกรอก, padding) · `md 768` (ตารางครีเอเตอร์ vs รายการ, คอลัมน์ตาราง) · `lg 1024` (sidebar, grid ของหน้า run) · **`1600`** (rail แผนงาน/แชทข้างตารางผลลัพธ์) | B |
+| Breakpoints | Tailwind ค่าเริ่มต้น: `sm 640` (ขนาดปุ่ม/ช่องกรอก, padding) · `md 768` (ตารางครีเอเตอร์ vs รายการ, คอลัมน์ตาราง) · `lg 1024` (sidebar, grid ของหน้า run) · rail แผนงาน/แชทข้างตารางผลลัพธ์ใช้ **container query** บน `<main>` (`@container/main`, เช่น `@min-[1280px]/main:`) แทน viewport 1600 เพื่อให้ได้พื้นที่เมื่อย่อ sidebar | B |
 | Base spacing | 4px scale: 4, 8, 12, 16, 20, 24, 32 · section ห่างกัน 24–32 · section heading อยู่นอกการ์ด ห่าง 8px | B |
 | Page widths | `/new` คอลัมน์เดียว 720px · `/runs/[id]` grid `minmax(0,1fr) 384px` ตั้งแต่ 1024 · `/results/[id]` grid `minmax(0,1fr) 384px` gap 24 ตั้งแต่ 1600 (ต่ำกว่านั้นเรียงต่อกัน, §9.6) · `/liff` คอลัมน์ 480px | B |
 | Share page | ไม่มี sidebar: header 56px (mark + ชื่อ + "ผลวิเคราะห์แบบอ่านอย่างเดียว") + canvas เดียวกัน | B |
@@ -225,27 +234,28 @@ Mitr หนาโดยธรรมชาติ จึงใช้ weight เบ
 
 | Token | Value | ใช้กับ |
 |---|---|---|
-| `--radius-card` | 8px | การ์ด, ตาราง, KPI strip, sheet/dialog/toast, empty state, notice, dropzone, segmented track, message ในแชท |
-| `--radius-control` | 6px | ปุ่ม, input, select, textarea, แถว nav, tooltip, แถบเตือนในบรรทัด |
-| `--radius-chip` | 4px | badge, persona chip, evidence ref chip |
-| full | 999px | avatar, progress bar, status dot |
-
-ยกเลิก: 10 / 12 / 16 / 20 / 24px, pill button, speech-bubble radius ของ v1.2
+| `--radius-card` | 16px | การ์ด, ตาราง, KPI card, hero, sheet/dialog/toast, empty state, notice, dropzone, segmented track, message ในแชท |
+| `--radius-control` | 10px | ปุ่ม, input, select, textarea, แถว nav, tooltip, แถบเตือนในบรรทัด |
+| `--radius-chip` | 999px (pill) | badge, persona chip, evidence ref chip |
+| full | 999px | avatar, ปุ่มไอคอน (`size="icon"`), progress bar, status dot |
+| skeleton | 8px | ค่าเริ่มต้นของ `Skeleton` (ส่ง radius ของรูปร่างจริงได้) |
 
 ### 5.3 Elevation
 
 ```css
---shadow-float: 0 8px 24px rgb(16 24 40 / .08), 0 1px 2px rgb(16 24 40 / .06);  /* B: layer ลอยเท่านั้น */
---overlay: rgb(17 24 39 / .32);                                                  /* B: ฉากหลัง sheet/dialog */
+--shadow-card:  0 1px 2px rgb(15 35 95 / .04), 0 2px 12px rgb(15 35 95 / .05);   /* การ์ดที่วางนิ่ง */
+--shadow-raise: 0 2px 4px rgb(15 35 95 / .05), 0 10px 28px rgb(15 35 95 / .09);  /* hover ของการ์ดที่กดได้ */
+--shadow-float: 0 16px 40px rgb(15 35 95 / .14), 0 2px 6px rgb(15 35 95 / .06);  /* layer ลอย */
+--overlay: rgb(15 23 42 / .36);                                                   /* ฉากหลัง sheet/dialog */
 ```
 
-- **การ์ดที่วางนิ่งไม่มีเงา** — แยกชั้นด้วยขอบ 1px `--border` และพื้น `--ground` เท่านั้น
-- เงาใช้กับ layer ลอย: sheet, dialog, toast, tooltip, skip link
-- ยกเลิก: `--shadow-card`, `--shadow-panel`, `--shadow-menu`, `--shadow-cta`, `--shadow-hover`, card lift
+- การ์ดใช้ `shadow-card` (เงาอ่อน ติดฟ้าเล็กน้อย) + ขอบ 1px `--border` · การ์ดที่กดได้ยกเป็น `shadow-raise` ตอน hover
+- `shadow-float` ใช้กับ layer ลอย: sheet, dialog, toast, tooltip, skip link
+- ไม่มีเงาบนปุ่ม, pill nav หรือข้อความ · ไม่มี glow
 
 ### 5.4 Glass & glow — ไม่ใช้
 
-ไม่มี glass, blur panel, glow, neon ในทุกหน้าจอ (UI_CONTRACT §2) · โค้ด `.glass` / `.glow-pill` ของ v1.2 ถูกนำออก
+ไม่มี glass, blur panel, glow, neon ในทุกหน้าจอ (UI_CONTRACT §2) · พื้นนุ่มแบบ gradient มีแค่ `bg-hero` (§3.3)
 
 ### 5.5 Motion
 
@@ -269,8 +279,10 @@ Mitr หนาโดยธรรมชาติ จึงใช้ weight เบ
 
 - **Lucide** (`lucide-react`) stroke 1.5 (nav, ปุ่ม, ลิงก์) / 1.75 (ไอคอนสถานะ, ปิด) ขนาด 14/16/20 · ไอคอนสีเดียวกับข้อความหรือ `--muted` / `--accent`
 - ไอคอนที่ใช้: `LayoutList` `SquarePen` `Bookmark` `UserRound` (nav) · `Menu` `X` · `ExternalLink` · `Link2` `Download` `SlidersHorizontal` · `Check` `LoaderCircle` `Clock` `TriangleAlert` `CircleAlert` `CircleDashed` `Circle` (stage) · `Pin` · `RotateCcw` `Send` `Square` (แชท) · `Mic` `Upload` `ImagePlus` (ไฟล์) · `Info` (demo banner) · `CircleCheck` (toast)
-- **ห้าม:** ไอคอนในวงกลม/สี่เหลี่ยมที่มีพื้นสี, ไอคอน sparkle / magic wand / robot สำหรับฟีเจอร์ AI, ภาพประกอบ AI ตกแต่ง, emoji แทนไอคอน
-- **Product mark** (`components/shell/product-mark.tsx`): SVG 20px (24px ในหน้า LIFF / not-found) วงกลมสองวงซ้อนกัน เส้น `--accent` 1.75 ส่วนที่ซ้อนกันเติม `--accent-soft` · ไม่ใช่ตัวอักษรในกรอบสี่เหลี่ยม
+- **ไอคอน AI:** `AiSparkleIcon` (`components/ui/ai-sparkle.tsx`, ดาวสี่แฉก 3 ดวง gradient `#3DD9FF` → `#1D5BFF`, `aria-hidden`) ใช้ได้เฉพาะปุ่มสั่ง AI (ปุ่ม `variant="ai"` ใช้ `tone="current"` สีขาว) และหัวของสรุปที่ AI เขียน
+- **tile ไอคอน:** เฉพาะ KPI card (tile 32px `--accent-soft` ไอคอน `--accent` สีเดียวทุกใบ)
+- **ห้าม:** ไอคอนในวงกลม/สี่เหลี่ยมที่มีพื้นสีที่อื่น, ไอคอน magic wand / robot / สมอง, sparkle เป็นของตกแต่ง, ภาพประกอบ AI ตกแต่ง, emoji แทนไอคอน
+- **Product mark** (`components/shell/product-mark.tsx`): SVG 20px (22px ใน sidebar, 24px ในหน้า LIFF / not-found) วงกลมสองวงซ้อนกัน เส้น `--accent` 1.75 ส่วนที่ซ้อนกันเติม `--accent-soft` · ไม่ใช่ตัวอักษรในกรอบสี่เหลี่ยม
 - **ไม่ใช้แล้ว:** diamond check bullet, round arrow button, CTA icon tile หมุน 45° · รายการใช้ bullet วงกลมธรรมดา (`list-disc`)
 
 ### 6.2 LINE Login button (บังคับตาม LINE guideline)
@@ -365,10 +377,11 @@ Mitr หนาโดยธรรมชาติ จึงใช้ weight เบ
 | Variant | Spec | ใช้ |
 |---|---|---|
 | **Primary** | พื้น `--accent`, ข้อความขาว 14/400, hover `--accent-hover`, disabled พื้น `--control` ข้อความ `--muted` · **ไม่เกินหนึ่งปุ่มต่อหน้าจอ** | วิเคราะห์แบรนด์ใหม่, เริ่มวิเคราะห์, บันทึกผล, รับทราบ |
-| Secondary (ค่าเริ่มต้น) | พื้นขาว ขอบ 1px `--control` ข้อความ `--text`, hover `--raised` | แชร์, ส่งออก, ยกเลิกการวิเคราะห์, ส่ง (แชท), ลองอีกครั้ง, feedback |
+| Secondary (ค่าเริ่มต้น) | พื้นขาว ขอบ 1px `--control` ข้อความ `--text`, hover พื้น `--accent-soft` ขอบ `--accent-line` ข้อความ `--accent-ink` | แชร์, ส่งออก, ยกเลิกการวิเคราะห์, ส่ง (แชท), ลองอีกครั้ง, feedback |
 | Tertiary | ปุ่มข้อความสี `--accent`, hover พื้น `--accent-soft` ข้อความ `--accent-ink`, padding ข้างน้อยกว่า | ปรับน้ำหนัก, เริ่มแชทใหม่, กลับค่าเดิม, กลับหน้าการวิเคราะห์ |
 | Danger | พื้นขาว ขอบ `--negative` 40% ข้อความ `--negative`, hover `--negative-soft` | ลบบัญชี, ลบข้อมูล, ยืนยันยกเลิก/เริ่มแชทใหม่ใน dialog |
-| Icon button | 32×32 (มือถือ 40–44) radius 6 + `aria-label` | ปิด sheet, เมนู, ปักหมุด, นำออก |
+| **AI** (`variant="ai"`) | `bg-brand-grad` ข้อความ/ไอคอนขาว (`AiSparkleIcon tone="current"`), hover มืดลงเล็กน้อย, disabled พื้น `--control` | ให้ AI ช่วยกรอกกลุ่มลูกค้า/แคมเปญ และการสั่งให้ AI เขียนอื่นๆ เท่านั้น |
+| Icon button | `size="icon"`: กลม 36×36 (มือถือ 44) + `aria-label` · ปุ่มไอคอนเดิมในหน้าจอ 32×32 radius 10 | ปิด sheet, เมนู, ปักหมุด, นำออก, ปุ่ม AI ในแถบกรอก |
 | LINE | §6.2 | เข้าสู่ระบบด้วย LINE |
 
 | Size | < 640px | ≥ 640px |
@@ -376,20 +389,20 @@ Mitr หนาโดยธรรมชาติ จึงใช้ weight เบ
 | `md` (ค่าเริ่มต้น) | สูง **44**, padding 0 14 | สูง **36**, padding 0 14 |
 | `sm` | สูง 40 | สูง 32 |
 
-- radius 6 ทุก variant · ไอคอน 16px นำหน้า label ได้ · `loading` = spinner 16px แทนไอคอน + disabled + label เดิม (`aria-busy`) · `ButtonLink` ใช้สไตล์เดียวกันกับ `next/link`
+- radius 10 (`size="icon"` กลม) · ไม่มีเงา · ไอคอน 16px นำหน้า label ได้ · `loading` = spinner 16px แทนไอคอน + disabled + label เดิม (`aria-busy`) · `ButtonLink` ใช้สไตล์เดียวกันกับ `next/link`
 - hover เปลี่ยนเฉพาะสี/พื้น 150ms · `cursor: pointer` กับทุกอย่างที่กดได้ · ยกเลิก: CTA Card, secondary pill, glow pill, ghost สีน้ำเงินบนพื้นเข้ม
 
 ### 8.2 Inputs & form controls (`components/ui/field.tsx`, `components/new/*`)
 
 - **Field:** label ด้านบน 13/400 `--text` (+ " *" สีแดงเมื่อบังคับ หรือ "(ไม่บังคับ)" 300 `--muted`) · hint ด้านล่าง 12 `--muted` · error 12 `--negative` และขอบช่องเป็นแดง · Field ใส่ `id`, `aria-describedby`, `aria-invalid` ให้ control เอง · กลุ่ม control (chips) ใช้ `fieldset` + `legend`
-- **Input / Select:** สูง 36 (มือถือ 44), ขอบ 1px `--control`, radius 6, 14/300 (มือถือ 16px), hover ขอบ `--subtle`, disabled พื้น `--raised` · placeholder ภาษาไทยเป็นตัวอย่าง ("เช่น ร้านกาแฟบ้านสวน") ไม่ใช่คำสั่ง · ช่องงบมี `฿` นำหน้า และจัดรูปแบบ `100,000` เมื่อออกจากช่อง
+- **Input / Select:** สูง 36 (มือถือ 44), ขอบ 1px `--input`, radius 10, 14/300 (มือถือ 16px), hover ขอบ `--muted`, focus = ขอบและ outline 2px `--accent` ชิดขอบ + halo 4px `--accent-soft` (ผิดพลาด: แดง), disabled พื้น `--raised` · placeholder ภาษาไทยเป็นตัวอย่าง ("เช่น ร้านกาแฟบ้านสวน") ไม่ใช่คำสั่ง · ช่องงบมี `฿` นำหน้า และจัดรูปแบบ `100,000` เมื่อออกจากช่อง
 - **Textarea:** สูงขั้นต่ำ 96, resize แนวตั้ง
 - **Persona chips** (`persona-picker.tsx`): multi-select toggle (`aria-pressed`), สูง 32 (มือถือ 44), radius 4, padding 0 10, 13px · ปกติ = ขาว + ขอบ `--control` 300 · เลือก = `--accent-soft` + ขอบ `--accent-line` + ข้อความ `--accent-ink` 400 + ไอคอน `Check` สี `--accent` · เลือกได้ไม่เกิน 10 · ระหว่างโหลดแสดง skeleton chip · รายการจาก API personas หรือ `PERSONAS_SEED`
 - **Objective segmented control** (`objective-control.tsx`): `role="radiogroup"` ปุ่มย่อย `role="radio"` (ลูกศร/Home/End เลือก, tab stop เดียว) · track `--raised` radius 8 padding 2 · ตัวเลือกสูง 32 (มือถือ 44) 13px · ที่เลือก = พื้นขาว + ขอบ `--border` 400 · 6 ตัวเลือก: รับรู้แบรนด์, เปิดตัวสินค้า, เพิ่มยอดขาย (ค่าเริ่มต้น), TikTok Shop, สร้างแบรนด์ระยะยาว, คอนเทนต์ UGC · hint ของตัวที่เลือกอยู่ใต้ control · มือถือ 2 คอลัมน์ / 640 ขึ้นไป 3 คอลัมน์ / 768 ขึ้นไปเรียงแถวเดียว
 - **Dropzone** (`screenshot-uploader.tsx`): `label` กรอบประ 1px `--control` radius 8 พื้นขาว สูงขั้นต่ำ 96 + ไอคอน `ImagePlus` · drag-over = ขอบ `--accent` + พื้น `--accent-soft` · เต็ม/ปิดใช้ = พื้น `--raised` ข้อความ `--subtle` · รับ drop/paste/เลือกไฟล์ ≤ 3 รูป PNG/JPEG/WebP ≤ 10 MB · thumbnail 72×72 radius 8 + ปุ่มลบ 28px + แถบ progress 4px (`--accent` บน `--accent-track`) + "อัปโหลดแล้ว" / error + ลองใหม่
 - **Voice input** (`voice-input.tsx`): idle = ปุ่ม secondary "อัดเสียง" (ซ่อนถ้าไม่มีไมค์) + "อัปโหลดไฟล์เสียง" · กำลังอัด = จุดแดง + เวลา (`output`, tabular) + ปุ่มหยุด · อัปโหลด/ถอดเสียง = แถบ progress · พร้อม = textarea ถอดเสียงแก้ไขได้ (ส่งเป็น `voiceTranscripts[]`) + "ลบและอัดใหม่" · ไม่มีปุ่มกลม 64px, ไม่มี waveform, ไม่มี ring pulse
 - **Budget & จำนวนครีเอเตอร์:** งบ min–max (ไม่บังคับ; ใส่ min ต้องใส่ max) · select 1–10 คน (ค่าเริ่มต้น 5) · ไม่มี dual slider และไม่มี tier chips ในฟอร์ม (`preferredTiers: []`; tier ที่แนะนำมาจากระบบ)
-- **Switch** (หน้า `/account`): `role="switch"` + `aria-checked` + `aria-label`
+- **Switch** (หน้า `/account`): `role="switch"` + `aria-checked` + `aria-label` · เปิด = `--accent`, ปิด = `--subtle`
 - **Checkbox:** native checkbox 16px `accent-color: --accent` (next actions, ยืนยันลบบัญชี)
 
 ### 8.3 Signature elements (UI_CONTRACT §7)
@@ -443,7 +456,7 @@ Mitr หนาโดยธรรมชาติ จึงใช้ weight เบ
 
 ### 8.4 KPI strip (`components/results/kpi-strip.tsx`)
 
-- container เดียว ขอบ 1px `--border` radius 8 · cell แยกด้วยเส้น 1px (grid `gap-px` บนพื้น `--border`) · 1 คอลัมน์ (< 640) / 2 (≥ 640) / 4 (≥ 1024; 5 เมื่อมี KPI conversion) · cell padding 16 (≥ 640: 20)
+- v1.4 (UI_CONTRACT §6): การ์ดแยกใบละ KPI (ขาว มุม 16 `shadow-card`) + tile ไอคอน 32px `--accent-soft` · ค่าด้านล่างนี้คือแบบ v1.3: container เดียว ขอบ 1px `--border` radius 8 · cell แยกด้วยเส้น 1px (grid `gap-px` บนพื้น `--border`) · 1 คอลัมน์ (< 640) / 2 (≥ 640) / 4 (≥ 1024; 5 เมื่อมี KPI conversion) · cell padding 16 (≥ 640: 20)
 - cell: label 13/300 `--muted` → ค่า **24/400** tabular → caption 12/300 `--muted` → badges
 
 | Cell | Field | ค่า / caption |
@@ -577,11 +590,11 @@ Mitr หนาโดยธรรมชาติ จึงใช้ weight เบ
 
 | Component | Spec |
 |---|---|
-| **Badge** | radius 4, 12/400, padding 2×8, ข้อความล้วน (ไม่มีไอคอนข้างใน) · tones: neutral (`--raised`/`--muted`), accent (`--accent-soft`/`--accent-ink`), positive, warning, negative (คู่ soft/ink) · ตัวเลือก dot สถานะ 6px |
+| **Badge** | pill (radius เต็ม), 12/400, padding 2×10, ข้อความล้วน (ไม่มีไอคอนข้างใน) · tones: neutral (`--raised`/`--muted`), accent (`--accent-soft`/`--accent-ink`), info (`--info-soft`/`--info-ink`: "ระบบวิเคราะห์ให้", "ระบบเลือกให้"), positive, warning, negative (คู่ soft/ink) · ตัวเลือก dot สถานะ 6px |
 | RunStatusBadge | §3.5 |
 | ConfidenceBadge / AssumptionBadge | §8.3 |
 | Tier | neutral badge: Nano / Micro / Mid / Macro / Mega |
-| Evidence ref chip | `[E3]` 12/400 `--accent-soft`/`--accent-ink` radius 4 ลิงก์ไปแหล่งที่มา (ใน sheet) · ในรายการแหล่งข้อมูลใช้พื้น `--raised` |
+| Evidence ref chip | `[E3]` 12/400 `--accent-soft`/`--accent-ink` pill ลิงก์ไปแหล่งที่มา (ใน sheet) · ในรายการแหล่งข้อมูลใช้พื้น `--raised` |
 | Source | neutral badge ชื่อแหล่ง (§6.3) |
 | ป้าย AI / demo | neutral badge "ร่างโดย AI ควรตรวจก่อนใช้" · "บัญชีตัวอย่าง" · "คลิปตัวอย่าง" |
 | Version | meta line ใต้หัวหน้า "เวอร์ชัน {n} · สร้างเมื่อ … · เป้าหมาย …" (ไม่มี VersionChip) |
@@ -591,14 +604,15 @@ Mitr หนาโดยธรรมชาติ จึงใช้ weight เบ
 | Component | Spec |
 |---|---|
 | **Sheet** | ขวา กว้างเริ่มต้น 560 (`width="full"` สำหรับเมนูมือถือ) · มือถือเต็มจอ · ขาว + `--shadow-float` + ขอบซ้าย 1px · header สูงขั้นต่ำ 56 เส้นล่าง `--rule` + ปุ่มปิด 32 (มือถือ 40) · subheader ไม่เลื่อน · focus trap, Escape/ฉากหลังปิด, ล็อก scroll, focus กลับ |
-| **Dialog** | กลางจอ (มือถือชิดล่าง) กว้าง ≤ 440 radius 8 padding 20 เงา float · ปุ่มชิดขวาบน desktop / เรียงตั้งเต็มกว้างบนมือถือ (ปุ่มปลอดภัยก่อน) · `alertdialog` สำหรับการลบ/ยกเลิก |
+| **Dialog** | กลางจอ (มือถือชิดล่าง) กว้าง ≤ 440 radius 16 padding 20 เงา float · ปุ่มชิดขวาบน desktop / เรียงตั้งเต็มกว้างบนมือถือ (ปุ่มปลอดภัยก่อน) · `alertdialog` สำหรับการลบ/ยกเลิก |
 | **Toast** | มุมล่างขวา (มือถือเต็มกว้างด้านล่าง) ขาว ขอบ 1px เงา float หนึ่งบรรทัด 4 วินาที ไม่เกิน 3 อัน · ไอคอน `CircleCheck`/`CircleAlert` สำหรับ positive/negative · `role="status"` `aria-live="polite"` |
-| **Tooltip** | portal (ไม่ถูกตัดโดย scroll container) ขาว ขอบ 1px radius 6 เงา float 12px กว้าง ≤ 280 · hover/focus, Escape ซ่อน, ผูก `aria-describedby` |
-| **Notice** | แถบระดับหน้า radius 8 ขอบ 1px: neutral (`--raised`) / accent (`--accent-soft` + ขอบ `--accent-line`) / warning / negative · title 14/400 + รายละเอียด 13/300 + actions ขวา |
+| **Tooltip** | portal (ไม่ถูกตัดโดย scroll container) ขาว ขอบ 1px radius 10 เงา float 12px กว้าง ≤ 280 · hover/focus, Escape ซ่อน, ผูก `aria-describedby` · `side="right"` ใน rail · `disabled` ปิดชั่วคราวโดยไม่ unmount · `repeatsLabel` เมื่อข้อความซ้ำกับชื่อปุ่ม (ไม่ผูก describedby) |
+| **Disclosure** | `components/ui/disclosure.tsx`: ปุ่ม `aria-expanded`/`aria-controls` (อยู่ใน h2–h4) + chevron หมุน + panel `hidden` เมื่อปิด · variants `section` / `card` / `inline` ("ดูรายละเอียด") · พรีวิวหนึ่งบรรทัดเมื่อปิด · controlled/uncontrolled · ไม่มี animation ความสูง |
+| **Notice** | แถบระดับหน้า radius 16 ขอบ 1px: neutral (`--raised`) / accent (`--accent-soft` + ขอบ `--accent-line`) / warning / negative · title 14/400 + รายละเอียด 13/300 + actions ขวา |
 | **DemoBanner** | neutral: พื้น `--raised` ขอบ 1px ไอคอน `Info` `--muted` + ข้อความ §7.2 · บนสุดของหน้าผลลัพธ์ หน้า run และหน้าแชร์เมื่อ `isDemo`/`health.demo` |
-| **EmptyState** | กรอบประ 1px `--control` radius 8 สูงขั้นต่ำ 160 · ประโยคเดียว 14/400 + (ถ้าจำเป็น) บรรทัดที่สอง 13 `--muted` + action ไม่เกินหนึ่ง |
+| **EmptyState** | กรอบประ 1px `--control` radius 16 สูงขั้นต่ำ 160 · ประโยคเดียว 14/400 + (ถ้าจำเป็น) บรรทัดที่สอง 13 `--muted` + action ไม่เกินหนึ่ง |
 | **ErrorBlock** | อยู่ในบล็อกที่ล้มเหลว: `--negative-soft` ขอบ `--negative` 25% ไอคอน `CircleAlert` + สาเหตุภาษาไทย + [ลองอีกครั้ง] + action เสริม + detail (เช่น รหัสการวิเคราะห์) · `role="alert"` |
-| **Skeleton** | บล็อก `--raised` ขนาดเท่าเนื้อหาจริง pulse 1.2s (ปิดเมื่อ reduced motion) |
+| **Skeleton** | บล็อก `--raised` ขนาดเท่าเนื้อหาจริง มุม 8px (หรือรูปร่างจริง) pulse 1.2s (ปิดเมื่อ reduced motion) |
 | Inline flash (หน้าผลลัพธ์) | บรรทัด `role="status"` ใต้หัวหน้า: positive/negative/neutral soft 4 วินาที (บันทึก, แชร์, บันทึกเวอร์ชัน) |
 
 ### 8.13 Saved / history rows
@@ -695,6 +709,7 @@ routes อยู่ใน `apps/web/app`: `(shell)/` (`/`, `/new`, `/runs/[id]`,
 ```
 
 - section heading อยู่นอกการ์ด ห่าง 8px · การ์ดละหนึ่ง section (แบรนด์ · กลุ่มลูกค้า · แคมเปญ · ไฟล์ประกอบ) · controls ตาม §8.2
+- **v1.4:** "กลุ่มลูกค้า" และ "แคมเปญ" เป็น "(ไม่บังคับ)" และมีแถบให้ AI ช่วยกรอก (ช่อง pill + ปุ่มกลม `variant="ai"`) ด้านบน · เป้าหมายมีตัวเลือกแรก "ระบบเลือกให้" และจำนวนครีเอเตอร์มี "ระบบแนะนำให้" · เว้นว่างได้ ระบบจะวิเคราะห์จากเพจและเว็บไซต์ให้ (UI_CONTRACT §8)
 - **Validation:** บังคับเฉพาะชื่อแบรนด์ · URL ตรวจตามช่อง (Facebook ต้องเป็นโดเมน facebook/fb, TikTok รับ `@handle` หรือ tiktok.com, รับโดเมนเปล่าแล้วเติม `https://`) · งบต้องเป็นตัวเลข ใส่ขั้นต่ำต้องใส่สูงสุด ต่ำสุดไม่เกินสูงสุด · ตรวจซ้ำด้วย `RunInput.safeParse` · submit แล้ว focus ช่องแรกที่ผิด
 - **ไฟล์/เสียงไม่พร้อม:** ตรวจ `/api/uploads/token` ก่อน (skeleton ระหว่างตรวจ) · ไม่ได้ตั้งค่า Blob (501/404) → แทนทั้ง section ด้วยกล่องข้อความ §7.2 "ระบบนี้ยังไม่ได้ตั้งค่าที่เก็บไฟล์..." · ถอดเสียงไม่ได้ (เช่น ไม่ได้ตั้งค่า OpenAI) → ช่องเปลี่ยนเป็น "สรุปสิ่งที่เล่า" + คำเตือน + "ลองถอดเสียงอีกครั้ง" (ส่งไฟล์เสียงให้ระบบถอดเองได้) · ไม่มีไมค์ → อัปโหลดไฟล์แทน (LIFF: "เปิดในเบราว์เซอร์")
 - **Sticky footer:** ขาว เส้นบน 1px (≥ 1024: ขอบซ้ายขวา + มุมบน radius 8) + safe-area · บรรทัดสรุป 14/400 + meta 12 · ไม่มีข้อมูลประกอบ → แถบ `--warning-soft` เหนือสรุป (ยังกดได้) · ระหว่างอัปโหลด: "รออัปโหลดไฟล์ให้เสร็จก่อนจึงเริ่มวิเคราะห์ได้" + ปุ่ม disabled · primary "เริ่มวิเคราะห์" เต็มกว้าง 44px บนมือถือ
@@ -748,6 +763,8 @@ routes อยู่ใน `apps/web/app`: `(shell)/` (`/`, `/new`, `/runs/[id]`,
 เพิ่มจากแชท (เมื่อมี)                                           │
 ตัวเลือกอื่น · วิธีคำนวณ [ปรับน้ำหนัก] · แหล่งข้อมูลที่อ้างอิง        │
 ```
+
+**v1.4:** หัวหน้าเป็นการ์ด hero (`bg-hero`): ป้าย AI "สรุปแบรนด์จากการวิเคราะห์" + ชื่อแบรนด์ + ย่อหน้าสรุปแบรนด์ (`brand.overviewTh`) + chips + badge info เมื่อระบบเลือกกลุ่มลูกค้า/เป้าหมายให้ + actions และ meta · `headlineTh` ย้ายไปเป็นบรรทัดนำของ "ภาพรวมชุดครีเอเตอร์" เหนือ KPI cards · ตารางมีปุ่ม chevron หน้าอันดับเพื่อเปิดสรุปความเหมาะสมของแต่ละคน · rail ข้างตารางใช้ container query บน `<main>` แทน 1600 (UI_CONTRACT §5, §8)
 
 **< 1600px:** คอลัมน์เดียวเรียง: KPI strip → ครีเอเตอร์ที่แนะนำ (+ เพิ่มจากแชท) → rail แผนงาน/ถาม-ตอบ → ตัวเลือกอื่น → วิธีคำนวณ → แหล่งข้อมูลที่อ้างอิง · rail อยู่ติดกับ shortlist เสมอ · rail ขึ้นข้างตารางเฉพาะ ≥ 1600 เพราะตาราง (≥ 860px) + rail 384 + sidebar 240 + gutter ต้องการความกว้างนั้น (UI_CONTRACT §8 ระบุ grid `1fr 384px`; ที่ใช้จริงคือ breakpoint 1600)
 
@@ -816,7 +833,7 @@ spec คงเดิม: Personas, Rate cards & tier bands/benchmarks, Blocklist
 
 ### 9.15 P14 — LINE push Flex (run completed / failed) — ยังไม่สร้าง (Phase 2)
 
-- **completed:** ส่วนหัวพื้นขาว (หรือ `#EEF2FE`) ข้อความ `#111827` · ไม่มี hero สีทึบ ไม่มี gradient ไม่มี emoji · "ผลวิเคราะห์ครีเอเตอร์พร้อมแล้ว" · ชื่อแบรนด์ · top 3 (รูป Blob สาธารณะ + handle + คะแนน) · ปุ่ม `#0536D2` "ดูผลลัพธ์" → `liff.permanentLink` ของ `/liff/results/<id>`
+- **completed:** ส่วนหัวพื้นขาว (หรือ `#EAF0FF`) ข้อความ `#0F172A` · ไม่มี hero สีทึบ ไม่มี gradient ไม่มี emoji · "ผลวิเคราะห์ครีเอเตอร์พร้อมแล้ว" · ชื่อแบรนด์ · top 3 (รูป Blob สาธารณะ + handle + คะแนน) · ปุ่ม `#1D5BFF` "ดูผลลัพธ์" → `liff.permanentLink` ของ `/liff/results/<id>`
 - **failed/partial:** "วิเคราะห์ไม่สำเร็จบางส่วน" · สาเหตุสั้นๆ · ปุ่ม "ดูรายละเอียด"
 - ไม่มีข้อมูลส่วนบุคคลของครีเอเตอร์เกิน handle + รูปสาธารณะ · Flex การ์ดแชร์ใช้รูปแบบเดียวกัน
 
@@ -853,34 +870,38 @@ spec คงเดิม: Personas, Rate cards & tier bands/benchmarks, Blocklist
 
 ## 11. Accessibility
 
-**Text contrast (WCAG 2.x, AA = 4.5:1 สำหรับข้อความปกติ)**
+**Text contrast (WCAG 2.x, AA = 4.5:1 สำหรับข้อความปกติ; ค่า v1.4)**
 
 | คู่สี | Contrast | ผล |
 |---|---|---|
-| `--text #111827` บน `#FFFFFF` / `--ground #F7F8FC` / `--raised #F2F4F8` | 17.74 / 16.72 / 16.11 | ผ่าน AAA |
-| `--text` บน `--accent-soft #EEF2FE` / `--warning-soft` / `--negative-soft` | 15.85 / 16.53 / 15.53 | ผ่าน AAA |
-| `--muted #5F6672` บน `#FFFFFF` / `--ground` / `--raised` | 5.78 / 5.45 / 5.25 | ผ่าน AA |
-| `--muted` บน `--accent-soft` / `--positive-soft` / `--warning-soft` | 5.17 / 5.18 / 5.39 | ผ่าน AA |
-| `--subtle #8A90A0` บน `#FFFFFF` | 3.19 | ต่ำกว่า AA — ใช้กับ placeholder ที่เป็นตัวอย่าง (มี label ด้านบนเสมอ) และสถานะ disabled เท่านั้น |
-| `--accent #0536D2` บน `#FFFFFF` / `--ground` / `--raised` / `--accent-soft` | 8.52 / 8.03 / 7.74 / 7.61 | ผ่าน AAA (ลิงก์, ปุ่ม tertiary) |
-| `#FFFFFF` บน `--accent` / `--accent-hover #042CB0` | 8.52 / 10.54 | ผ่าน AAA (ปุ่ม primary) |
-| `--accent-ink #04299E` บน `--accent-soft` / `--accent-track #E3E9FD` / `#FFFFFF` | 10.33 / 9.55 / 11.56 | ผ่าน AAA |
-| `--positive #1F7A4D` บน `--positive-soft #E7F6EE` / `#FFFFFF` | 4.76 / 5.32 | ผ่าน AA |
-| `--negative #C4242A` บน `--negative-soft #FDECEC` / `#FFFFFF` | 5.06 / 5.78 | ผ่าน AA |
-| `--warning #8A4B08` บน `--warning-soft #FFF6E5` / `#FFFFFF` | 6.33 / 6.79 | ผ่าน AA |
-| `--muted` บน `--control #D3D7E2` (ปุ่ม primary ที่ disabled) | 4.02 | disabled (ไม่อยู่ในเกณฑ์) |
+| `--text #0F172A` บน `#FFFFFF` / `--ground #F3F6FD` / `--raised #EEF3FC` | 17.85 / 16.50 / 16.03 | ผ่าน AAA |
+| `--text` บน `--accent-soft #EAF0FF` / `--warning-soft` / `--negative-soft` | 15.65 / 16.49 / 15.67 | ผ่าน AAA |
+| `--muted #55607A` บน `#FFFFFF` / `--ground` / `--raised` | 6.29 / 5.81 / 5.65 | ผ่าน AA |
+| `--muted` บน `--accent-soft` / `--positive-soft` / `--warning-soft` | 5.51 / 5.67 / 5.81 | ผ่าน AA |
+| `--subtle #8792AB` บน `#FFFFFF` | 3.12 | ต่ำกว่า AA — disabled และของตกแต่งเท่านั้น |
+| `--placeholder #67728B` บน `#FFFFFF` | 4.82 | ผ่าน AA |
+| `--accent #1D5BFF` บน `#FFFFFF` / `--ground` / `--raised` / `--accent-soft` | 5.26 / 4.86 / 4.72 / 4.61 | ผ่าน AA (ลิงก์, ปุ่ม tertiary) |
+| `#FFFFFF` บน `--accent` / `--accent-hover #1449E0` | 5.26 / 6.86 | ผ่าน AA (ปุ่ม primary, pill nav) |
+| `#FFFFFF` บน `--grad-brand` (`#0A6FC2` → `#1D5BFF`) | 5.17 – 5.26 | ผ่าน AA (ปุ่ม AI) · `text-brand-grad` บนขาว 5.17–5.26, บน `--accent-soft` 4.53–4.61 |
+| `--accent-ink #0B3BC4` บน `--accent-soft` / `--accent-track #DCE6FF` / `#FFFFFF` | 7.55 / 6.90 / 8.62 | ผ่าน AAA |
+| `--info-ink #086F88` บน `--info-soft #E3F7FC` | 5.21 | ผ่าน AA (badge info) |
+| `--positive #127A4A` บน `--positive-soft #E7F7EF` / `#FFFFFF` | 4.85 / 5.37 | ผ่าน AA |
+| `--negative #C62A2F` บน `--negative-soft #FEECED` / `#FFFFFF` | 4.89 / 5.57 | ผ่าน AA |
+| `--warning #8F4C00` บน `--warning-soft #FFF5E1` / `#FFFFFF` | 6.06 / 6.56 | ผ่าน AA |
+| `--muted` บน `--control #CFD8EA` (ปุ่ม primary ที่ disabled) | 4.39 | disabled (ไม่อยู่ในเกณฑ์) |
 | `#FFFFFF` บน `--line-green #06C755` | 2.26 | ต่ำกว่า AA — สีและข้อความบังคับตาม LINE guideline |
 
 **Non-text contrast (WCAG 1.4.11, 3:1)**
 
 | องค์ประกอบ | Contrast | ผล |
 |---|---|---|
-| fill/tick `--accent` บน `--accent-track` (fit strip, bullet p50, progress) | 7.04 | ผ่าน |
-| tick `--text` (pool median) บน `--accent-track` | 14.65 | ผ่าน |
-| tick `--muted` (tier median) บน `--accent-track` / `--accent-line` | 4.78 / 3.93 | ผ่าน |
-| ช่วง `--accent-line` บน `--accent-track` | 1.22 | ไม่ผ่าน — ช่วง p25–p75 แสดงเป็นตัวเลขใน label และ `aria-label` เสมอ |
-| ขอบ input `--control #D3D7E2` บน `#FFFFFF` | 1.44 | ไม่ผ่าน 3:1 — ทุกช่องมี label ด้านบน; ต้องตัดสินใน finish gate ว่าจะเข้มขึ้นหรือไม่ |
-| ขอบการ์ด `--border #E6E8EF` บน `#FFFFFF` | 1.22 | ตกแต่ง (ไม่ใช่ขอบของ control) |
+| fill/tick `--accent` บน `--accent-track` (fit strip, bullet p50, progress) | 4.21 | ผ่าน |
+| tick `--accent-ink` (pool median, tier median) บน `--accent-track` / `--accent-line` / `#FFFFFF` | 6.90 / 5.61 / 8.62 | ผ่าน |
+| ช่วง `--accent-line` บน `--accent-track` | 1.23 | ไม่ผ่าน — ช่วง p25–p75 แสดงเป็นตัวเลขใน label และ `aria-label` เสมอ |
+| ขอบ input `--input #8590AB` บน `#FFFFFF` | 3.19 | ผ่าน |
+| `--info #0894B4` (เครื่องหมาย/ไอคอน) บน `#FFFFFF` | 3.56 | ผ่าน (ไม่ใช้เป็นข้อความ) |
+| track ของ switch ที่ปิด `--subtle` บน `#FFFFFF` / ปุ่มกลมสีขาวบน track | 3.12 / 3.12 | ผ่าน |
+| ขอบการ์ด `--border #E1E7F5` บน `#FFFFFF` | 1.24 | ตกแต่ง (ไม่ใช่ขอบของ control) |
 
 - **Focus:** `:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px }` ทุก interactive element · ห้าม `outline: none` โดยไม่มีตัวแทน · label/dropzone ที่ห่อ input ใช้ `has-[:focus-visible]`
 - **Touch target:** ปุ่ม/ช่องกรอก 44px ต่ำกว่า 640px · แถว nav 44px ต่ำกว่า 1024px · ปุ่มเมนู/icon 44px บน top bar · ระยะห่าง ≥ 8px
@@ -926,22 +947,26 @@ spec คงเดิม: Personas, Rate cards & tier bands/benchmarks, Blocklist
 @import "tailwindcss";
 
 :root {
-  --ground: #f7f8fc;  --surface: #ffffff;  --raised: #f2f4f8;
-  --border: #e6e8ef;  --rule: #eef0f5;     --control: #d3d7e2;
-  --text: #111827;    --muted: #5f6672;    --subtle: #8a90a0;
-  --accent: #0536d2;  --accent-hover: #042cb0;
-  --accent-soft: #eef2fe;  --accent-track: #e3e9fd;  --accent-line: #c8d4fb;  --accent-ink: #04299e;
-  --positive: #1f7a4d; --positive-soft: #e7f6ee;
-  --negative: #c4242a; --negative-soft: #fdecec;
-  --warning: #8a4b08;  --warning-soft: #fff6e5;
+  --ground: #f3f6fd;  --surface: #ffffff;  --raised: #eef3fc;
+  --border: #e1e7f5;  --rule: #eaeff8;     --control: #cfd8ea;
+  --input: #8590ab;   --placeholder: #67728b;
+  --text: #0f172a;    --muted: #55607a;    --subtle: #8792ab;
+  --accent: #1d5bff;  --accent-hover: #1449e0;
+  --accent-soft: #eaf0ff;  --accent-track: #dce6ff;  --accent-line: #bfd0ff;  --accent-ink: #0b3bc4;
+  --info: #0894b4;    --info-soft: #e3f7fc;  --info-ink: #086f88;
+  --positive: #127a4a; --positive-soft: #e7f7ef;
+  --negative: #c62a2f; --negative-soft: #feeced;
+  --warning: #8f4c00;  --warning-soft: #fff5e1;
   --line-green: #06c755; --line-green-hover: #05b34c;
-  --shadow-float: 0 8px 24px rgb(16 24 40 / 0.08), 0 1px 2px rgb(16 24 40 / 0.06);
-  --overlay: rgb(17 24 39 / 0.32);
+  --overlay: rgb(15 23 42 / 0.36);
+  --grad-hero: radial-gradient(...) x4;              /* cyan, lilac, peach, blue blobs at low alpha */
+  --grad-brand: linear-gradient(135deg, #0a6fc2 0%, #1d5bff 100%);
+  --sidebar-w: 248px;                                 /* :root[data-sidebar="collapsed"] → 76px */
   color-scheme: light;
 }
 
 @theme inline {
-  /* every token above → --color-* (bg-ground, text-muted, border-rule, bg-accent-soft, ...) */
+  /* every colour token above → --color-* (bg-ground, text-muted, border-rule, bg-accent-soft, text-info-ink, ...) */
   --font-sans: var(--font-mitr), system-ui, sans-serif;
   --text-title: 24px;   --text-title--line-height: 32px;
   --text-section: 16px; --text-section--line-height: 24px;
@@ -949,16 +974,18 @@ spec คงเดิม: Personas, Rate cards & tier bands/benchmarks, Blocklist
   --text-label: 13px;   --text-label--line-height: 20px;
   --text-meta: 12px;    --text-meta--line-height: 18px;
   --text-kpi: 24px;     --text-kpi--line-height: 32px;
-  --radius-card: 8px;   --radius-control: 6px;  --radius-chip: 4px;
+  --radius-card: 16px;  --radius-control: 10px;  --radius-chip: 999px;
   --animate-pulse-soft: cvc-pulse 1.2s ease-in-out infinite;
   --animate-sheet-in: cvc-sheet-in 200ms cubic-bezier(0.22, 1, 0.36, 1);
   --animate-fade-in: cvc-fade-in 150ms ease-out;
 }
+@theme static { --shadow-card: ...; --shadow-raise: ...; --shadow-float: ...; }   /* §5.3 */
+@custom-variant rail { :root[data-sidebar="collapsed"] [data-rail] & { @slot; } }
 ```
 
-- base layer: body บน `--ground` 14/22/300 Mitr · `:focus-visible` ring · `cursor: pointer` · placeholder `--subtle` · `::selection` `--accent-track` · `tabular-nums` บน `table`/`time`/`output`
-- utilities: `.num` (tabular-nums), `.safe-bottom` · `prefers-reduced-motion` ตัด animation/transition ทั้งหมด
-- ไม่มี gradient, viz palette หลายสี, dark theme, shadow ของการ์ด ใน tokens
+- base layer: body บน `--ground` 14/22/300 Mitr · `:focus-visible` ring · `cursor: pointer` · placeholder `--placeholder` · `::selection` `--accent-track` · `tabular-nums` บน `table`/`time`/`output`
+- utilities: `.num` (tabular-nums), `.safe-bottom`, `bg-hero`, `bg-brand-grad`, `text-brand-grad`, `shadow-card` / `shadow-raise` / `shadow-float` · variant `rail:` (sidebar ที่ย่อ) · `prefers-reduced-motion` ตัด animation/transition ทั้งหมด
+- ไม่มี viz palette หลายสีและ dark theme ใน tokens
 
 ### 13.2 Fonts (Next.js)
 
@@ -967,13 +994,15 @@ spec คงเดิม: Personas, Rate cards & tier bands/benchmarks, Blocklist
 import { Mitr } from 'next/font/google';
 const mitr = Mitr({ subsets: ['thai', 'latin'], weight: ['300', '400', '500', '600'], display: 'swap', variable: '--font-mitr' });
 
-export const viewport = { width: 'device-width', initialScale: 1, viewportFit: 'cover', themeColor: '#f7f8fc' };
-// <html lang="th" className={mitr.variable}><body><Providers>{children}</Providers></body></html>
+export const viewport = { width: 'device-width', initialScale: 1, viewportFit: 'cover', themeColor: '#f3f6fd' };
+// <html lang="th" className={mitr.variable} suppressHydrationWarning>
+//   <head><script>{SIDEBAR_INIT_SCRIPT /* components/shell/sidebar-state.ts: data-sidebar ก่อน paint */}</script></head>
+//   <body><Providers>{children}</Providers></body></html>
 ```
 
 ### 13.3 Component stack
 
-- **Base:** primitives เขียนเองบน Tailwind v4 (`components/ui/*`: Button, Field/Input/Select/Textarea, Card/SectionHeading, PageHeader, Badge, CreatorAvatar, Sheet, Dialog, Tabs, Tooltip, Toast, Skeleton, EmptyState, ErrorBlock, DemoBanner + `useFocusTrap`, `useMounted`) · ไม่ใช้ shadcn/Radix/Vaul
+- **Base:** primitives เขียนเองบน Tailwind v4 (`components/ui/*`: Button, Field/Input/Select/Textarea, Card/SectionHeading, PageHeader, Badge, CreatorAvatar, Sheet, Dialog, Tabs, Tooltip, Toast, Skeleton, EmptyState, ErrorBlock, DemoBanner, Disclosure, AiSparkleIcon + `useFocusTrap`, `useMounted`) · ไม่ใช้ shadcn/Radix/Vaul
 - **Icons:** `lucide-react` · **Charts:** ไม่มี chart library — fit strip, bullet, progress เป็น `span` วางตำแหน่งด้วย style · **Motion:** CSS keyframes ใน `globals.css` (ไม่มี `motion`)
 - **Images:** `next/image` + `images.remotePatterns` (`*.public.blob.vercel-storage.com`, `profile.line-scdn.net`) · `lib/images.ts` ตรวจ allowlist ก่อน render
 - **Chat:** `@ai-sdk/react` `useChat` + `DefaultChatTransport` (`prepareSendMessagesRequest` ส่งเฉพาะข้อความล่าสุด, header จาก `authHeaders()`) + renderer ของ tool parts / source-url / data-grounding-warning
@@ -992,9 +1021,9 @@ apps/web/
 │  ├─ liff/ layout.tsx · page.tsx · [...path]/page.tsx · next-param.ts
 │  └─ share/[token]/page.tsx
 ├─ components/
-│  ├─ shell/    app-shell · sidebar-content · nav · product-mark
-│  ├─ ui/       badge · button · card · creator-avatar · demo-banner · dialog · empty-state · error-block · field
-│  │            page-header · sheet · skeleton · tabs · toast · tooltip · use-focus-trap · use-mounted
+│  ├─ shell/    app-shell · sidebar-content · nav · product-mark · sidebar-state · use-sidebar-collapsed
+│  ├─ ui/       ai-sparkle · badge · button · card · creator-avatar · demo-banner · dialog · disclosure · empty-state
+│  │            error-block · field · page-header · sheet · skeleton · tabs · toast · tooltip · use-focus-trap · use-mounted
 │  ├─ results/  result-screen · shared-result-screen · result-layout · kpi-strip · creators-table · fit-strip
 │  │            expected-views-bullet · estimate-badges · creator-sheet · creator-sheet-tabs · plan-panel · next-actions
 │  │            alternatives-list · methodology-card · weights-sheet · evidence-list · notice · labels · numbers
@@ -1008,7 +1037,7 @@ apps/web/
 
 ### 13.5 Finish gate (ก่อนบอกว่าหน้าจอเสร็จ)
 
-`node .claude/skills/design-taste-frontend/scripts/lint.mjs --app <url>` และ `inspect.mjs --app <url>` ผ่าน · screenshot ที่ 375 และ 1440 ตรวจแล้ว · ไม่มีรายการต้องห้ามของ UI_CONTRACT §2 · ทุก state ใน §12 เข้าถึงได้ · ตัวเลขชิดขวาและ tabular
+`node .claude/skills/design-taste-frontend/scripts/lint.mjs --app apps/web/app apps/web/components` และ `inspect.mjs --app <url>` ผ่าน (gate ยอมเฉพาะ gradient token: custom property `--grad-*` และ `@utility` ที่ใช้มัน) · screenshot ที่ 375 และ 1440 ตรวจแล้ว · ไม่มีรายการต้องห้ามของ UI_CONTRACT §2 · ทุก state ใน §12 เข้าถึงได้ · ตัวเลขชิดขวาและ tabular
 
 ---
 
@@ -1016,8 +1045,8 @@ apps/web/
 
 | ควรทำ | ไม่ควรทำ |
 |---|---|
-| `#0536D2` บนเครื่องหมายเล็ก (ปุ่ม filled ปุ่มเดียว, ลิงก์, data, focus) · พื้นที่ใช้ `--accent-soft`/`--accent-track` | เทพื้นที่ใหญ่ด้วยน้ำเงินเต็มเฉด, hero/แบนเนอร์สีทึบ, น้ำเงินหลายเฉด, violet/indigo |
-| การ์ดขาว ขอบ 1px `--border` ไม่มีเงา · เงาเฉพาะ sheet/dialog/toast/tooltip | gradient, glass, blur, glow, neon, เงาบนการ์ด, card lift |
+| `#1D5BFF` บนปุ่มหลัก pill nav ที่ active ลิงก์ data focus · พื้นที่ใช้ `--accent-soft`/`--accent-track` · cyan (`--info`) เป็นคู่หู | เทการ์ด/section ด้วยน้ำเงินทึบหรือ `bg-brand-grad`, แบนเนอร์สีทึบ, violet/indigo |
+| การ์ดขาวมุม 16 ขอบ 1px `--border` + `shadow-card` · `bg-hero` บน hero/สรุปที่ AI เขียน · `bg-brand-grad` บนปุ่ม AI | gradient ที่ไม่ใช่ token, gradient เคลื่อนไหว, glass, blur, glow, neon, เงาบนปุ่ม |
 | Mitr ฟอนต์เดียว body 300 หัวข้อ 500 | ฟอนต์ที่สอง, uppercase tracked micro-label, monospace label |
 | ปุ่ม primary ไม่เกินหนึ่งปุ่มต่อหน้าจอ ชิดขวาของหัวหน้า | CTA card, ปุ่ม pill เรืองแสง, ปุ่ม filled หลายปุ่ม |
 | รูปครีเอเตอร์จาก Blob + initials เมื่อไม่มีรูป | หน้าคน stock หรือที่สร้างด้วย AI, ภาพประกอบ AI ตกแต่ง |
@@ -1025,11 +1054,12 @@ apps/web/
 | ค่าคาดการณ์เป็นช่วง p25–p75 + "คาดการณ์" + ป้ายความมั่นใจ + "สมมติฐาน" เมื่อใช้ค่าอ้างอิงที่ยังไม่ปรับเทียบ | ค่าคาดการณ์ตัวเดียวที่ดูเหมือนข้อมูลจริงจากแพลตฟอร์ม, ตัวเลขที่ไม่ได้คำนวณ |
 | fit strip และ bullet แบบเส้นบาง + ตัวเลขจริงข้างๆ | sparkline, donut/score ring, gauge, กราฟหลายสี |
 | ตัวเลขชิดขวา tabular-nums หน่วยครบ | ตัวเลขชิดซ้ายในคอลัมน์, ตัวเลขไม่มีหน่วย |
-| ไอคอน lucide เส้นบางวางเปล่าๆ | ไอคอนในวงกลม/สี่เหลี่ยมมีพื้นสี, ไอคอน sparkle/robot สำหรับ AI, กรอบหมุน 45° |
+| ไอคอน lucide เส้นบางวางเปล่าๆ · `AiSparkleIcon` บนปุ่มสั่ง AI และสรุปที่ AI เขียน · tile ไอคอนสี `--accent-soft` เฉพาะ KPI card | tile ไอคอนหลายสี, ไอคอนในวงกลม/สี่เหลี่ยมที่อื่น, sparkle เป็นของตกแต่ง, robot/magic wand, กรอบหมุน 45° |
+| สรุปก่อน รายละเอียดใน `Disclosure` (ปิดไว้ + พรีวิว) หรือ sheet | ตัดเนื้อหาทิ้ง, ซ่อนคำเตือนหรือตัวเลขที่สรุปอ้างถึง |
 | copy ไทยสั้น ปุ่มเป็นคำกริยา | emoji, เครื่องหมายอัศเจรีย์, "AI-powered"/"Supercharge"/"Welcome back" |
 | ข้อมูลตัวอย่างติด demo banner + `isDemo` | แสดงข้อมูลสมมติโดยไม่บอก |
 | ปุ่ม LINE ทางการ (`#06C755`) สำหรับเข้าสู่ระบบ | ปุ่ม LINE สีแบรนด์, ใช้เขียว LINE ที่อื่น |
-| `--muted #5F6672` สำหรับข้อความรอง | `--subtle #8A90A0` กับข้อความที่ต้องอ่าน |
+| `--muted #55607A` สำหรับข้อความรอง | `--subtle #8792AB` หรือ `--info` กับข้อความที่ต้องอ่าน |
 | disclosure `#โฆษณา` ในไอเดียคอนเทนต์ทุกอัน | ไอเดียคอนเทนต์ที่ซ่อนว่าเป็นโฆษณา |
 | product mark ที่วาดเอง + โลโก้ทางการเมื่อจำเป็น | สร้าง wordmark "Convert Cake" เองด้วยฟอนต์ |
 

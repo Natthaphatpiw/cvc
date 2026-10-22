@@ -162,10 +162,10 @@ export function ScreenshotUploader({ disabled, onChange }: ScreenshotUploaderPro
             ? 'cursor-not-allowed border-control bg-raised text-subtle'
             : dragOver
               ? 'border-accent bg-accent-soft'
-              : 'border-control bg-surface hover:bg-raised',
+              : 'border-control bg-surface hover:border-accent-line hover:bg-raised',
         )}
       >
-        <ImagePlus aria-hidden className={cn('size-5', disabled || full ? 'text-subtle' : 'text-muted')} strokeWidth={1.5} />
+        <ImagePlus aria-hidden className={cn('size-5', disabled || full ? 'text-subtle' : 'text-accent')} strokeWidth={1.5} />
         <span className={cn('text-body', disabled || full ? 'text-subtle' : 'text-text')}>
           {full ? `แนบครบ ${MAX_SCREENSHOTS} รูปแล้ว` : (
             <>
@@ -203,7 +203,7 @@ export function ScreenshotUploader({ disabled, onChange }: ScreenshotUploaderPro
         <ul className="mt-3 flex flex-wrap gap-3" aria-label="รูปที่แนบ">
           {items.map((item, idx) => (
             <li key={item.key} className="w-[72px]">
-              <div className="relative size-[72px] overflow-hidden rounded-card border border-border bg-raised">
+              <div className="relative size-[72px] overflow-hidden rounded-control border border-border bg-raised">
                 {/* Object URL preview; next/image does not handle blob: sources. */}
                 <img src={item.previewUrl} alt={`รูปที่ ${idx + 1}`} className="size-full object-cover" />
                 <button

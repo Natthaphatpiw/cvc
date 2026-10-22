@@ -7,7 +7,7 @@ import { formatNumber } from '@/lib/format';
 /** Compact rows for creators that scored well but were not picked. */
 export function AlternativesList({ items, isDemo }: { items: readonly Alternative[]; isDemo: boolean }) {
   return (
-    <ul className="divide-y divide-rule overflow-hidden rounded-card border border-border bg-surface">
+    <ul className="divide-y divide-rule overflow-hidden rounded-card border border-border bg-surface shadow-card">
       {items.map((alt) => {
         const handle = alt.handle.replace(/^@/, '');
         return (

@@ -1,37 +1,64 @@
 @import "tailwindcss";
 
-/* Tokens from docs/UI_CONTRACT.md §3. Light only; one hue family (Convert Cake blue) plus semantic status pairs. */
+/*
+ * Tokens from docs/UI_CONTRACT.md §3. Light only: a vivid blue accent with a cyan partner on blue-grey neutrals,
+ * semantic status pairs, soft card shadows, and gradient tokens for hero and AI surfaces only.
+ * Contrast on --surface (#fff): text 17.9:1, muted 6.3:1, accent 5.3:1 (white on accent 5.3:1), accent-ink 8.6:1.
+ */
 :root {
-  --ground: #f7f8fc;
+  --ground: #f3f6fd;
   --surface: #ffffff;
-  --raised: #f2f4f8;
-  --border: #e6e8ef;
-  --rule: #eef0f5;
-  --control: #d3d7e2;
-  /* form-field border and placeholder: 3.28:1 and 4.83:1 on white (WCAG 1.4.11 / 1.4.3) */
-  --input: #878e9f;
-  --placeholder: #6b7280;
-  --text: #111827;
-  --muted: #5f6672;
-  --subtle: #8a90a0;
-  --accent: #0536d2;
-  --accent-hover: #042cb0;
-  --accent-soft: #eef2fe;
-  --accent-track: #e3e9fd;
-  --accent-line: #c8d4fb;
-  --accent-ink: #04299e;
-  --positive: #1f7a4d;
-  --positive-soft: #e7f6ee;
-  --negative: #c4242a;
-  --negative-soft: #fdecec;
-  --warning: #8a4b08;
-  --warning-soft: #fff6e5;
+  --raised: #eef3fc;
+  --border: #e1e7f5;
+  --rule: #eaeff8;
+  --control: #cfd8ea;
+  /* form-field border and placeholder: 3.19:1 and 4.82:1 on white (WCAG 1.4.11 / 1.4.3) */
+  --input: #8590ab;
+  --placeholder: #67728b;
+  --text: #0f172a;
+  --muted: #55607a;
+  /* disabled and decorative only (3.12:1), never for text someone has to read */
+  --subtle: #8792ab;
+  --accent: #1d5bff;
+  --accent-hover: #1449e0;
+  --accent-soft: #eaf0ff;
+  --accent-track: #dce6ff;
+  --accent-line: #bfd0ff;
+  --accent-ink: #0b3bc4;
+  /* cyan partner: --info for marks and icons (3.56:1 on white), --info-ink for text on --info-soft (5.21:1) */
+  --info: #0894b4;
+  --info-soft: #e3f7fc;
+  --info-ink: #086f88;
+  --positive: #127a4a;
+  --positive-soft: #e7f7ef;
+  --negative: #c62a2f;
+  --negative-soft: #feeced;
+  --warning: #8f4c00;
+  --warning-soft: #fff5e1;
   --line-green: #06c755;
   --line-green-hover: #05b34c;
-  --shadow-float: 0 8px 24px rgb(16 24 40 / 0.08), 0 1px 2px rgb(16 24 40 / 0.06);
-  --overlay: rgb(17 24 39 / 0.32);
+  --overlay: rgb(15 23 42 / 0.36);
+
+  /*
+   * Gradient tokens (UI_CONTRACT §2): applied only through the bg-hero, bg-brand-grad and text-brand-grad utilities
+   * below, never animated. --grad-brand starts at #0a6fc2 rather than a light cyan so white text on it stays at
+   * 5.2:1 or more, and so does the gradient text on white and on --accent-soft.
+   */
+  --grad-hero:
+    radial-gradient(48% 70% at 0% 0%, rgb(43 212 255 / 0.16), transparent 70%),
+    radial-gradient(42% 64% at 100% 0%, rgb(196 186 255 / 0.22), transparent 70%),
+    radial-gradient(46% 70% at 100% 100%, rgb(255 196 160 / 0.2), transparent 72%),
+    radial-gradient(56% 80% at 28% 115%, rgb(29 91 255 / 0.1), transparent 70%);
+  --grad-brand: linear-gradient(135deg, #0a6fc2 0%, #1d5bff 100%);
+
+  /* Desktop sidebar column (components/shell/app-shell.tsx); the collapsed rail is set on <html> before paint. */
+  --sidebar-w: 248px;
 
   color-scheme: light;
+}
+
+:root[data-sidebar="collapsed"] {
+  --sidebar-w: 76px;
 }
 
 @theme inline {
@@ -52,6 +79,9 @@
   --color-accent-track: var(--accent-track);
   --color-accent-line: var(--accent-line);
   --color-accent-ink: var(--accent-ink);
+  --color-info: var(--info);
+  --color-info-soft: var(--info-soft);
+  --color-info-ink: var(--info-ink);
   --color-positive: var(--positive);
   --color-positive-soft: var(--positive-soft);
   --color-negative: var(--negative);
@@ -78,15 +108,35 @@
   --text-kpi: 24px;
   --text-kpi--line-height: 32px;
 
-  --radius-card: 8px;
-  --radius-control: 6px;
-  --radius-chip: 4px;
-
-  --shadow-float: 0 8px 24px rgb(16 24 40 / 0.08), 0 1px 2px rgb(16 24 40 / 0.06);
+  --radius-card: 16px;
+  --radius-control: 10px;
+  --radius-chip: 999px;
 
   --animate-pulse-soft: cvc-pulse 1.2s ease-in-out infinite; /* taste-skill-ignore: loading skeletons and busy bars only (UI_CONTRACT §6), off under reduced motion */
   --animate-sheet-in: cvc-sheet-in 200ms cubic-bezier(0.22, 1, 0.36, 1);
   --animate-fade-in: cvc-fade-in 150ms ease-out;
+}
+
+/*
+ * Elevation, slightly blue-tinted. shadow-card: resting cards (under 8% alpha, small offset, so it reads as a lift
+ * and not as a floating layer); shadow-raise: hover on clickable cards; shadow-float: sheets, dialogs, toasts,
+ * tooltips. `static` keeps the custom properties on :root for plain CSS too.
+ */
+@theme static {
+  --shadow-card: 0 1px 2px rgb(15 35 95 / 0.04), 0 2px 12px rgb(15 35 95 / 0.05);
+  --shadow-raise: 0 2px 4px rgb(15 35 95 / 0.05), 0 10px 28px rgb(15 35 95 / 0.09);
+  --shadow-float: 0 16px 40px rgb(15 35 95 / 0.14), 0 2px 6px rgb(15 35 95 / 0.06);
+}
+
+/*
+ * `rail:` styles the desktop sidebar while it is collapsed to the icon rail. It needs both the state on <html>
+ * (data-sidebar="collapsed") and the [data-rail] panel, so the phone menu sheet, which shares SidebarContent,
+ * never collapses. The selector outranks responsive utilities such as lg:h-8 on purpose.
+ */
+@custom-variant rail {
+  :root[data-sidebar="collapsed"] [data-rail] & {
+    @slot;
+  }
 }
 
 @keyframes cvc-pulse {
@@ -176,6 +226,27 @@
 
 @utility safe-bottom {
   padding-bottom: calc(16px + env(safe-area-inset-bottom));
+}
+
+/* Soft pastel blobs over white: the results hero and other AI-written summary surfaces. Text on it keeps AA. */
+@utility bg-hero {
+  background-color: var(--surface);
+  background-image: var(--grad-hero);
+}
+
+/* Cyan-blue fill for AI actions (Button variant="ai"); white text and icons on it stay at 5.2:1 or more. */
+@utility bg-brand-grad {
+  background-color: var(--accent);
+  background-image: var(--grad-brand);
+}
+
+/* Gradient ink for a short accent word or figure (never a paragraph); falls back to --accent. */
+@utility text-brand-grad {
+  color: var(--accent);
+  background-image: var(--grad-brand);
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
 }
 
 @media (prefers-reduced-motion: reduce) {

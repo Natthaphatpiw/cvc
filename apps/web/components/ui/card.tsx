@@ -3,10 +3,10 @@ import { cn } from '@/lib/cn';
 
 export type CardProps = ComponentProps<'div'> & { className?: string; children: ReactNode };
 
-/** White surface, 1px border, radius 8, padding 20 (16 on phone), no shadow. */
+/** White surface, 1px border, radius 16, padding 20 (16 on phone), soft resting elevation (shadow-card). */
 export function Card({ className, children, ...props }: CardProps) {
   return (
-    <div className={cn('rounded-card border border-border bg-surface p-4 sm:p-5', className)} {...props}>
+    <div className={cn('rounded-card border border-border bg-surface p-4 shadow-card sm:p-5', className)} {...props}>
       {children}
     </div>
   );

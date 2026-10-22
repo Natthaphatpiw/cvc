@@ -15,7 +15,7 @@ export function bulletScaleMax(items: readonly { views: KpiRange; tierMedianView
 }
 
 /**
- * Expected views per post: accent-line band p25–p75, 2px accent tick at p50, 1px muted tick at the
+ * Expected views per post: accent-line band p25–p75, 2px accent tick at p50, 1px accent-ink tick at the
  * tier median. Label to the right: p50, with the range below. UI_CONTRACT §7.3.
  */
 export function ExpectedViewsBullet({
@@ -57,7 +57,7 @@ export function ExpectedViewsBullet({
         {tierMedianViews !== null && (
           <span
             aria-hidden="true"
-            className="absolute top-0 block bg-muted"
+            className="absolute top-0 block bg-accent-ink"
             style={{ left: Math.min(TRACK_W - 1, x(tierMedianViews)), width: 1, height: TICK_H }}
           />
         )}

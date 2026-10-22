@@ -121,7 +121,7 @@ function MessageView({ message }: { message: UIMessage }) {
           </div>
         ) : null}
         {grounding ? (
-          <p className="rounded-chip bg-warning-soft px-2 py-1 text-meta font-light text-warning">
+          <p className="rounded-control bg-warning-soft px-2 py-1 text-meta font-light text-warning">
             ตัวเลขบางส่วนในคำตอบอาจไม่ตรงกับข้อมูลในผลวิเคราะห์ ตรวจสอบก่อนนำไปใช้
           </p>
         ) : null}

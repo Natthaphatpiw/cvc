@@ -62,7 +62,7 @@ function Switch({
       onClick={() => onChange(!checked)}
       className={cn(
         'relative inline-flex h-5 w-8 shrink-0 items-center rounded-full transition-colors duration-150 disabled:cursor-not-allowed disabled:opacity-60',
-        checked ? 'bg-text' : 'bg-control',
+        checked ? 'bg-accent' : 'bg-subtle',
       )}
     >
       <span

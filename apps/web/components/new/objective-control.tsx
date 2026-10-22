@@ -3,6 +3,7 @@
 import { useRef, type KeyboardEvent } from 'react';
 import type { Objective } from '@cvc/schemas';
 import { cn } from '@/lib/cn';
+import { AiSparkleIcon } from '@/components/ui/ai-sparkle';
 
 export const OBJECTIVES: { id: Objective; label: string; hint: string }[] = [
   { id: 'awareness', label: 'รับรู้แบรนด์', hint: 'เน้นยอดวิวและการเข้าถึงคนจำนวนมาก' },
@@ -13,25 +14,44 @@ export const OBJECTIVES: { id: Objective; label: string; hint: string }[] = [
   { id: 'ugc', label: 'คอนเทนต์ UGC', hint: 'เน้นคลิปรีวิวที่แบรนด์นำไปใช้ต่อได้' },
 ];
 
-export function objectiveLabel(o: Objective): string {
+/** The first option: null = the agent picks the objective from its brand analysis (CampaignInput.objective null). */
+export const AUTO_OBJECTIVE = {
+  id: null,
+  label: 'ระบบเลือกให้',
+  hint: 'ระบบจะเลือกเป้าหมายจากผลวิเคราะห์แบรนด์ และบอกเหตุผลไว้ในหน้าผลลัพธ์',
+} as const;
+
+const OPTIONS: { id: Objective | null; label: string; hint: string }[] = [AUTO_OBJECTIVE, ...OBJECTIVES];
+
+export function objectiveLabel(o: Objective | null): string {
+  if (o === null) return AUTO_OBJECTIVE.label;
   return OBJECTIVES.find((x) => x.id === o)?.label ?? o;
 }
 
+export function objectiveHint(o: Objective | null): string {
+  return OPTIONS.find((x) => x.id === o)?.hint ?? '';
+}
+
 export type ObjectiveControlProps = {
-  value: Objective;
-  onChange: (o: Objective) => void;
+  /** null = "ระบบเลือกให้". */
+  value: Objective | null;
+  onChange: (o: Objective | null) => void;
   labelledBy: string;
   describedBy?: string;
 };
 
-/** Segmented control with radio semantics: arrow keys move and select, one tab stop. */
+/**
+ * Segmented control with radio semantics: arrow keys move and select, one tab stop. "ระบบเลือกให้" (null) is a
+ * real option, so the group always has a checked radio to tab to.
+ */
 export function ObjectiveControl({ value, onChange, labelledBy, describedBy }: ObjectiveControlProps) {
   const refs = useRef<Array<HTMLButtonElement | null>>([]);
+  const checked = Math.max(0, OPTIONS.findIndex((o) => o.id === value));
 
   const select = (index: number) => {
-    const n = OBJECTIVES.length;
+    const n = OPTIONS.length;
     const i = ((index % n) + n) % n;
-    const item = OBJECTIVES[i];
+    const item = OPTIONS[i];
     if (!item) return;
     onChange(item.id);
     refs.current[i]?.focus();
@@ -49,7 +69,7 @@ export function ObjectiveControl({ value, onChange, labelledBy, describedBy }: O
       select(0);
     } else if (e.key === 'End') {
       e.preventDefault();
-      select(OBJECTIVES.length - 1);
+      select(OPTIONS.length - 1);
     }
   };
 
@@ -58,13 +78,14 @@ export function ObjectiveControl({ value, onChange, labelledBy, describedBy }: O
       role="radiogroup"
       aria-labelledby={labelledBy}
       aria-describedby={describedBy}
-      className="grid grid-cols-2 gap-0.5 rounded-card bg-raised p-0.5 sm:inline-grid sm:grid-cols-3 md:flex md:w-max md:max-w-full md:flex-wrap"
+      className="grid grid-cols-2 gap-1 rounded-card bg-raised p-1 sm:grid-cols-4"
     >
-      {OBJECTIVES.map((o, i) => {
-        const on = o.id === value;
+      {OPTIONS.map((o, i) => {
+        const on = i === checked;
+        const auto = o.id === null;
         return (
           <button
-            key={o.id}
+            key={o.id ?? 'auto'}
             ref={(el) => {
               refs.current[i] = el;
             }}
@@ -75,10 +96,12 @@ export function ObjectiveControl({ value, onChange, labelledBy, describedBy }: O
             onClick={() => onChange(o.id)}
             onKeyDown={(e) => onKeyDown(e, i)}
             className={cn(
-              'h-11 whitespace-nowrap rounded-control px-3 text-label transition-colors duration-150 sm:h-8',
-              on ? 'border border-border bg-surface font-normal text-text' : 'border border-transparent font-light text-muted hover:text-text',
+              'inline-flex h-11 min-w-0 items-center justify-center gap-1.5 whitespace-nowrap rounded-[12px] px-2 text-label transition-colors duration-150 sm:h-9',
+              auto && 'col-span-2 sm:col-span-1',
+              on ? 'bg-accent font-normal text-white' : 'font-light text-muted hover:bg-surface hover:text-text',
             )}
           >
+            {auto ? <AiSparkleIcon size={14} tone={on ? 'current' : 'gradient'} /> : null}
             {o.label}
           </button>
         );

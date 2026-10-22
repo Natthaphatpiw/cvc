@@ -81,7 +81,7 @@ export function FitStrip({
               <span className="block h-full bg-accent" style={{ width: value * BAR_W }} />
             </span>
             <span
-              className="absolute top-0 block bg-text"
+              className="absolute top-0 block bg-accent-ink"
               style={{ left: Math.min(BAR_W - 1, med * BAR_W), width: 1, height: TICK_H }}
             />
           </span>

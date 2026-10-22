@@ -28,7 +28,7 @@ const iconBtn =
 
 function ListSkeleton() {
   return (
-    <div className="overflow-hidden rounded-card border border-border bg-surface" aria-busy="true" aria-label="กำลังโหลดรายการที่บันทึก">
+    <div className="overflow-hidden rounded-card border border-border bg-surface shadow-card" aria-busy="true" aria-label="กำลังโหลดรายการที่บันทึก">
       <div className="h-9 bg-raised" />
       {Array.from({ length: 4 }, (_, i) => (
         <div key={i} className="flex h-12 items-center gap-4 border-t border-rule px-4">
@@ -142,7 +142,7 @@ export function SavedView() {
       />
 
       {isGuest ? (
-        <div className="mb-6 flex flex-col gap-3 rounded-card border border-border bg-surface p-4 sm:flex-row sm:items-center sm:p-5">
+        <div className="mb-6 flex flex-col gap-3 rounded-card border border-border bg-surface p-4 shadow-card sm:flex-row sm:items-center sm:p-5">
           <div className="min-w-0 flex-1">
             <p className="text-body font-normal text-text">บันทึกไว้ในเบราว์เซอร์นี้เท่านั้น</p>
             <p className="text-label text-muted">
@@ -163,7 +163,7 @@ export function SavedView() {
         ) : lineItems.length === 0 ? (
           <EmptySaved />
         ) : (
-          <div className="overflow-hidden rounded-card border border-border bg-surface">
+          <div className="overflow-hidden rounded-card border border-border bg-surface shadow-card">
             <div className="overflow-x-auto">
               <table className="w-full border-collapse text-left">
                 <thead>
@@ -250,7 +250,7 @@ export function SavedView() {
         ) : guest.items.length === 0 ? (
           <EmptySaved />
         ) : (
-          <div className="overflow-hidden rounded-card border border-border bg-surface">
+          <div className="overflow-hidden rounded-card border border-border bg-surface shadow-card">
             <table className="w-full border-collapse text-left">
               <thead>
                 <tr className="bg-raised text-meta text-muted">
