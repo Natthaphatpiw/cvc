@@ -58,7 +58,21 @@ export function clamp(x: number, lo: number, hi: number): number {
 
 export function truncate(text: string, max: number): string {
   const t = text.trim();
-  return t.length <= max ? t : `${t.slice(0, Math.max(0, max - 1))}…`;
+  if (t.length <= max) return t;
+  const head = t.slice(0, Math.max(0, max - 1));
+  // never end on the first half of a surrogate pair (an emoji cut in two)
+  return `${/[\uD800-\uDBFF]$/.test(head) ? head.slice(0, -1) : head}…`;
+}
+
+const LONE_SURROGATE = /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/g;
+
+/**
+ * Replaces lone UTF-16 surrogates (half an emoji, left where provider text was cut in the middle of a pair) with
+ * U+FFFD. JSON.stringify writes them as \ud83d escapes, which the OpenAI API rejects with "Invalid body: failed to
+ * parse JSON value". Same as String#toWellFormed, which the ES2023 lib does not type yet.
+ */
+export function wellFormed(text: string): string {
+  return text.replace(LONE_SURROGATE, '\uFFFD');
 }
 
 const ASCII = /^[\x20-\x7e]+$/;

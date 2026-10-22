@@ -54,7 +54,8 @@ function createUpstash(client: Redis): RedisLike {
             : await client.set(key, value);
       return res === null ? null : 'OK';
     },
-    incrbyfloat: (key, by) => client.incrbyfloat(key, by),
+    // typed as a number, but the client returns the raw string when it does not round-trip ("0.0123400000000000004")
+    incrbyfloat: async (key, by) => Number(await client.incrbyfloat(key, by)),
     incr: (key) => client.incr(key),
     del: (...keys) => (keys.length ? client.del(...keys) : Promise.resolve(0)),
     expire: (key, seconds) => client.expire(key, Math.max(1, Math.ceil(seconds))),

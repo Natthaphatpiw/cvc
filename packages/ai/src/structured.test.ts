@@ -77,4 +77,16 @@ describe('generateStructured via evaluateCreator (mock model)', () => {
     const e = await evaluateCreator(brand, dossier());
     expect(e.rubric.find((r) => r.criterion === 'audience_fit')?.evidenceVideoIds).toEqual([]);
   });
+
+  it('repairs half an emoji in provider text before the request (the API rejects it as invalid JSON)', async () => {
+    const model = new MockLanguageModelV4({ doGenerate: [result(evaluation(['v1']))] });
+    mocks.model = model;
+    const brand = buildStubBrandProfile({ brief: buildBaseBrief(runInput()), evidence: [], personas: PERSONAS_SEED, categories: REF_SEED.categories, allowWebSearch: false });
+    const d = dossier();
+    d.profile.bio = 'รีวิวสกินแคร์ 😍\uD83D';
+    await evaluateCreator(brand, d);
+    const prompt = JSON.stringify(model.doGenerateCalls[0]?.prompt);
+    expect(prompt).toContain('รีวิวสกินแคร์ 😍\uFFFD');
+    expect(prompt).not.toMatch(/\\ud83d/i);
+  });
 });

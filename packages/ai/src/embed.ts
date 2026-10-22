@@ -2,7 +2,7 @@ import { embedMany } from 'ai';
 import { shouldStub } from './env';
 import { embeddingDimensions, embeddingModel } from './models';
 import { estimateEmbeddingCostUsd, reportUsage } from './pricing';
-import { segmentWords } from './text';
+import { segmentWords, wellFormed } from './text';
 import type { AiCtx } from './types';
 import { EMBED_TIMEOUT_MS, withTimeout } from './timeout';
 
@@ -40,7 +40,7 @@ export async function embed(texts: string[], ctx?: AiCtx): Promise<number[][]> {
   if (shouldStub('embed')) return texts.map((t) => hashedEmbedding(t, dims));
 
   // The API rejects empty strings; embed a single space instead so positions stay aligned.
-  const values = texts.map((t) => (t.trim() ? t.normalize('NFC') : ' '));
+  const values = texts.map((t) => (t.trim() ? wellFormed(t).normalize('NFC') : ' '));
   const { id, model } = embeddingModel();
   const result = await embedMany({ model, values, dimensions: dims, maxRetries: 1, abortSignal: withTimeout(ctx?.signal, EMBED_TIMEOUT_MS) });
   await reportUsage(ctx, { model: id, inputTokens: result.usage.tokens, outputTokens: 0, costUsd: estimateEmbeddingCostUsd(id, result.usage.tokens) });

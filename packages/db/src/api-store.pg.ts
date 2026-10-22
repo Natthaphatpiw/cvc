@@ -1,5 +1,5 @@
 import { listPersonasPg } from './agent-store.pg';
-import { pgCode, type Sql } from './client';
+import { pgCode, transaction, type Sql } from './client';
 import {
   categoryFromRow,
   currentNoticeVersion,
@@ -25,7 +25,7 @@ export function createPgApiStore(sql: Sql): ApiStore {
 
     async upsertLineUser(a) {
       const lineUserId = isLineUserId(a.lineSub) ? a.lineSub : null;
-      await sql.begin(async (tx) => {
+      await transaction(sql, async (tx) => {
         if (lineUserId) {
           // a LINE account re-linked to a new auth user: free the unique line_user_id on the stale row first
           await tx`update app.users set line_user_id = null where line_user_id = ${lineUserId} and id <> ${a.userId}`;
@@ -59,7 +59,7 @@ export function createPgApiStore(sql: Sql): ApiStore {
 
     async recordConsent(userId, c) {
       if (!isUuid(userId)) return;
-      await sql.begin(async (tx) => {
+      await transaction(sql, async (tx) => {
         const rows = await tx`
           insert into app.user_consents (user_id, consent_type, version, granted)
           select ${userId}::uuid, ${c.consentType}, ${c.version}, ${c.granted}

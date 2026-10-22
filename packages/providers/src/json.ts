@@ -77,7 +77,9 @@ export function imageUrl(v: unknown): string | null {
 
 export function truncate(text: string, max: number): string {
   if (text.length <= max) return text;
-  return `${text.slice(0, Math.max(0, max - 1)).trimEnd()}…`;
+  const head = text.slice(0, Math.max(0, max - 1));
+  // never end on the first half of a surrogate pair (an emoji cut in two is invalid JSON for the OpenAI API)
+  return `${(/[\uD800-\uDBFF]$/.test(head) ? head.slice(0, -1) : head).trimEnd()}…`;
 }
 
 export function median(values: number[]): number | null {

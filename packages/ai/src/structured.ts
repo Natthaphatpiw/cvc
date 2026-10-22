@@ -4,6 +4,7 @@ import type { z } from 'zod';
 import { AiOutputError } from './env';
 import { languageModel, type ModelTier, type ReasoningEffort } from './models';
 import { reportTextUsage } from './pricing';
+import { wellFormed } from './text';
 import { LLM_CALL_TIMEOUT_MS, withTimeout } from './timeout';
 import type { AiCtx } from './types';
 
@@ -33,6 +34,12 @@ export type StructuredResult<D> = { value: D; issues: string[]; sourceUrls: stri
 /** Model calls do not retry: the Workflow step owns retries (SYSTEM_DESIGN §4.12). Repairs are counted separately. */
 const MODEL_MAX_RETRIES = 0;
 
+/** Text parts with lone surrogates repaired: provider text can carry half an emoji, which fails the whole request. */
+function wellFormedContent(content: UserContent): UserContent {
+  if (typeof content === 'string') return wellFormed(content);
+  return content.map((part) => (part.type === 'text' ? { ...part, text: wellFormed(part.text) } : part));
+}
+
 /** Compact, model-readable zod issues (path: message), at most 12 lines. */
 export function compactZodIssues(error: z.ZodError): string[] {
   return error.issues.slice(0, 12).map((i) => `${i.path.length ? i.path.join('.') : '(root)'}: ${i.message}`);
@@ -45,7 +52,7 @@ type Attempt<D> = { ok: true; value: D; issues: string[]; rawText: string } | { 
  * compact validation errors back to the model.
  */
 export async function generateStructured<L, D>(call: StructuredCall<L, D>): Promise<StructuredResult<D>> {
-  const firstMessages: ModelMessage[] = [{ role: 'user', content: call.userContent }];
+  const firstMessages: ModelMessage[] = [{ role: 'user', content: wellFormedContent(call.userContent) }];
   const sourceUrls = new Set<string>();
 
   const first = await attempt(call, firstMessages, sourceUrls);
@@ -83,7 +90,7 @@ async function attempt<L, D>(call: StructuredCall<L, D>, messages: ModelMessage[
   try {
     result = await generateText({
       model,
-      instructions: call.instructions,
+      instructions: wellFormed(call.instructions),
       messages,
       output: Output.object({ schema: call.llmSchema, name: call.stage }),
       tools: call.tools,

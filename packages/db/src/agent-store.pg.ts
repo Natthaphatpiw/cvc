@@ -9,7 +9,7 @@ import {
   type ProgressEvent,
 } from '@cvc/schemas';
 import type postgres from 'postgres';
-import { jsonb, pgCode, type Queryable, type Sql } from './client';
+import { jsonb, pgCode, transaction, type Queryable, type Sql } from './client';
 import {
   candidateFromDb,
   candidateToDb,
@@ -237,7 +237,7 @@ export function createPgAgentStore(sql: Sql): AgentStore {
       if (cards.length === 0) return;
       if (!isUuid(runId)) throw new StoreError('not_found', `run ${runId} not found`);
       const hashed = await Promise.all(cards.map(async (card) => ({ card, hash: await sha256Hex(canonicalJson(card)) })));
-      await sql.begin(async (tx) => {
+      await transaction(sql, async (tx) => {
         // serialize writers of the same run so refs stay gapless and unique
         await tx`select pg_advisory_xact_lock(hashtext(${'cvc.evidence:' + runId}))`;
         const [run] = await tx<{ company: string | null; website: string | null }[]>`
@@ -304,7 +304,7 @@ export function createPgAgentStore(sql: Sql): AgentStore {
 
     async upsertCreator(p, a) {
       const c = creatorToDb(p, a);
-      return sql.begin(async (tx) => {
+      return transaction(sql, async (tx) => {
         // A handle that moved to another account: release it on the old row first (unique (platform, handle)).
         await tx`
           update kol.creators set handle = '__released_' || id::text
@@ -416,7 +416,7 @@ export function createPgAgentStore(sql: Sql): AgentStore {
 
     async saveResult(r, ownerId) {
       const topIds = r.recommendations.map((x) => x.creatorId).filter(isUuid);
-      await mapPgErrors(`run ${r.runId}`, () => sql.begin(async (tx) => {
+      await mapPgErrors(`run ${r.runId}`, () => transaction(sql, async (tx) => {
         await tx`
           insert into analysis.results (id, run_id, owner_id, schema_version, version, result, brand_name, top_creator_ids,
                                         weights, is_partial, expires_at)
@@ -444,7 +444,7 @@ export function createPgAgentStore(sql: Sql): AgentStore {
     async saveResultVersion(resultId, r, reason = 'rescore') {
       if (!isUuid(resultId)) throw new StoreError('not_found', `result ${resultId} not found`);
       const topIds = r.recommendations.map((x) => x.creatorId).filter(isUuid);
-      return sql.begin(async (tx) => {
+      return transaction(sql, async (tx) => {
         const [row] = await tx<{ version: number; result: unknown }[]>`
           update analysis.results set
             version = version + 1,
@@ -475,7 +475,7 @@ export function createPgAgentStore(sql: Sql): AgentStore {
 
     async createChatSession(resultId, ownerId) {
       if (!isUuid(resultId)) throw new StoreError('not_found', `result ${resultId} not found`);
-      return sql.begin(async (tx) => {
+      return transaction(sql, async (tx) => {
         // lock the result so concurrent resets cannot both take the same session_no
         const [res] = await tx<{ id: string }[]>`select id from analysis.results where id = ${resultId} for update`;
         if (!res) throw new StoreError('not_found', `result ${resultId} not found`);
@@ -528,7 +528,7 @@ export function createPgAgentStore(sql: Sql): AgentStore {
 
     async purgeUser(userId) {
       if (!isUuid(userId)) return { runs: 0, threadIds: [] };
-      return sql.begin(async (tx) => {
+      return transaction(sql, async (tx) => {
         // lock the user's results first: createChatSession locks the result too, so no session can appear between
         // reading the thread ids and the cascade below
         await tx`
