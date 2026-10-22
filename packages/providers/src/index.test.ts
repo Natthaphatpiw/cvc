@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   ProviderError,
   clientIntelSourceModes,
+  isAccountError,
   getClientIntelProvider,
   getKolProvider,
   isApifyConfigured,
@@ -59,5 +60,18 @@ describe('provider selection', () => {
     vi.stubEnv('SCRAPECREATORS_API_KEY', 'sc-test');
     expect(getKolProvider().mock).toBe(false);
     expect(getKolProvider().name).toBe('scrapecreators');
+  });
+});
+
+describe('isAccountError', () => {
+  const http = (status: number) => new ProviderError(`x: HTTP ${status}`, { provider: 'x', retryable: false, status });
+
+  it('marks refused accounts (no credits, bad or revoked key) as permanent', () => {
+    expect([401, 402, 403].map((s) => isAccountError(http(s)))).toEqual([true, true, true]);
+  });
+
+  it('leaves other failures alone', () => {
+    expect([400, 404, 429, 500].map((s) => isAccountError(http(s)))).toEqual([false, false, false, false]);
+    expect(isAccountError(new Error('HTTP 402'))).toBe(false);
   });
 });

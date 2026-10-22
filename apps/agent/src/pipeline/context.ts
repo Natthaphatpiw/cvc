@@ -1,6 +1,7 @@
 import type { AiCtx } from '@cvc/ai';
 import { budget } from '@cvc/cache';
 import { StoreError, getAgentStore, type RunRecord } from '@cvc/db';
+import { isAccountError } from '@cvc/providers';
 import type { GateContext } from '@cvc/scoring';
 import {
   STAGE_TO_STATUS,
@@ -33,6 +34,19 @@ export function isRunInactive(err: unknown): boolean {
   return errorMessage(err) === RUN_INACTIVE;
 }
 
+/**
+ * Error for a step whose every provider call failed. When the provider refused the account on every call (out of
+ * credits, missing or revoked key) the run fails at once: retrying cannot help, and QStash's backoff would keep the run
+ * spinning for about half an hour. Anything else stays retryable, since the provider may be briefly down.
+ */
+export function providerFailure(errors: unknown[], retryableMessageTh: string): Error {
+  if (errors.length > 0 && errors.every(isAccountError)) {
+    console.error(`[agent] creator data provider refused the account, check its credits and API key: ${errorMessage(errors[0])}`);
+    return new WorkflowNonRetryableError(MSG.providerAccount);
+  }
+  return new Error(retryableMessageTh);
+}
+
 export const MSG = {
   failedGeneric: 'การวิเคราะห์ล้มเหลว กรุณาลองใหม่อีกครั้ง',
   budgetHardWarning: 'ใช้งบประมาณการประมวลผลถึงเพดาน ระบบจึงหยุดขั้นตอนที่มีค่าใช้จ่ายและสรุปผลจากข้อมูลที่มี',
@@ -40,6 +54,8 @@ export const MSG = {
   noCandidates: 'ไม่พบครีเอเตอร์ที่ผ่านเกณฑ์ ลองขยายช่วงผู้ติดตาม ลดข้อจำกัด หรือเพิ่มลิงก์ของแบรนด์แล้วลองใหม่',
   noUrls: 'ไม่มีลิงก์เว็บไซต์หรือโซเชียลของแบรนด์ ผลลัพธ์อาจแม่นยำน้อยลง',
   providerUnavailable: 'ดึงข้อมูลโปรไฟล์ครีเอเตอร์จากผู้ให้บริการข้อมูลไม่สำเร็จ กรุณาลองใหม่อีกครั้งในภายหลัง',
+  searchUnavailable: 'ค้นหาครีเอเตอร์จากแหล่งข้อมูลไม่สำเร็จ กรุณาลองใหม่อีกครั้ง',
+  providerAccount: 'ดึงข้อมูลครีเอเตอร์ไม่ได้ในตอนนี้ เพราะบัญชีผู้ให้บริการข้อมูลครีเอเตอร์ใช้งานไม่ได้ (เช่น เครดิตหมด) กรุณาแจ้งผู้ดูแลระบบ แล้วลองใหม่ภายหลัง',
   evaluationUnavailable: 'ประเมินความเหมาะสมของครีเอเตอร์กับแบรนด์ไม่สำเร็จ จึงยังไม่มีครีเอเตอร์ที่แนะนำได้ กรุณาลองใหม่อีกครั้ง',
   enrichPartial: 'ดึงข้อมูลโปรไฟล์ครีเอเตอร์บางคนจากผู้ให้บริการข้อมูลไม่สำเร็จ ผลลัพธ์จึงมาจากครีเอเตอร์ที่ดึงข้อมูลได้เท่านั้น',
 } as const;

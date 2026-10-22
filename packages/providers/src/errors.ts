@@ -29,6 +29,11 @@ export function isRetryableStatus(status: number): boolean {
   return status === 408 || status === 429 || status >= 500;
 }
 
+/** The provider refused the account itself (out of credits, missing or revoked key): retrying cannot help. */
+export function isAccountError(err: unknown): boolean {
+  return err instanceof ProviderError && (err.status === 401 || err.status === 402 || err.status === 403);
+}
+
 export function notConfigured(provider: string, envName: string): ProviderError {
   return new ProviderError(`${provider} is not configured (${envName} missing and DEMO_MODE=off)`, {
     provider,

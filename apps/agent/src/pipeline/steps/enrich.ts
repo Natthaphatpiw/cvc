@@ -15,6 +15,7 @@ import {
   loadActiveRun,
   loadBrandOrFail,
   loadRef,
+  providerFailure,
   putCheckpoint,
   store,
 } from '../context';
@@ -106,22 +107,23 @@ export async function enrichBatchStep(runId: string, batchIndex: number): Promis
   const gateCtx = buildGateContext({ run, brief: briefOf(run), brand, ref, relaxed: discover?.relaxed === true });
   await demoPause(run);
 
-  let failed = 0;
+  const errors: unknown[] = [];
   const results = await mapLimit(batch, BATCH_SIZE, async (candidate) => {
     try {
       return await enrichOne(candidate, brand, ref, gateCtx);
     } catch (err) {
-      failed += 1;
+      errors.push(err);
       console.warn('[agent] enrich failed', candidate.handle, errorMessage(err));
       return null;
     }
   });
+  const failed = errors.length;
   const ok = results.filter((r): r is Enriched => r !== null);
   if (batch.length > 0 && failed === batch.length) {
     const earlier = await Promise.all(Array.from({ length: batchIndex }, (_, b) => getCheckpoint<EnrichCheckpoint>(runId, StepKey.enrich(b))));
-    // Retryable: nothing could be fetched so far, so the provider is most likely down or out of credits. When the
-    // retries run out the run fails with this message instead of "no candidates".
-    if (earlier.every((cp) => !cp || cp.enriched + cp.excluded === 0)) throw new Error(MSG.providerUnavailable);
+    // Nothing could be fetched so far, so the provider is down or refusing the account. A refused account fails the run
+    // at once; otherwise it is retried, and when the retries run out the run fails with this message, not "no candidates".
+    if (earlier.every((cp) => !cp || cp.enriched + cp.excluded === 0)) throw providerFailure(errors, MSG.providerUnavailable);
   }
   if (ok.length > 0) await store().saveCandidates(runId, ok.map((r) => r.row));
 

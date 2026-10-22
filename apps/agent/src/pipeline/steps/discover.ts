@@ -5,6 +5,7 @@ import type { BrandProfile, CandidateRef } from '@cvc/schemas';
 import { normalizeHandle } from '@cvc/thai';
 import { errorMessage, mapLimit } from '../../lib/async';
 import {
+  MSG,
   addWarnings,
   briefOf,
   buildGateContext,
@@ -16,6 +17,7 @@ import {
   loadActiveRun,
   loadBrandOrFail,
   loadRef,
+  providerFailure,
   putCheckpoint,
 } from '../context';
 import {
@@ -106,20 +108,18 @@ export async function discoverStep(runId: string): Promise<{ batchCount: number;
   await demoPause(run);
 
   const provider = getKolProvider();
-  let searchFailures = 0;
+  const searchErrors: unknown[] = [];
   const hits = await mapLimit(queries, SEARCH_CONCURRENCY, async (q) => {
     try {
       return await provider.searchCreators({ keyword: q.keyword, limit: SEARCH_LIMIT_PER_QUERY });
     } catch (err) {
-      searchFailures += 1;
+      searchErrors.push(err);
       console.warn('[agent] searchCreators failed', q.keyword, errorMessage(err));
       return [];
     }
   });
-  if (queries.length > 0 && searchFailures === queries.length) {
-    // Retryable: the provider may be briefly unavailable.
-    throw new Error('ค้นหาครีเอเตอร์จากแหล่งข้อมูลไม่สำเร็จ กรุณาลองใหม่อีกครั้ง');
-  }
+  const searchFailures = searchErrors.length;
+  if (queries.length > 0 && searchFailures === queries.length) throw providerFailure(searchErrors, MSG.searchUnavailable);
 
   const unique = new Map<string, CandidateRef>();
   for (const r of hits.flat()) if (!unique.has(refKey(r))) unique.set(refKey(r), r);

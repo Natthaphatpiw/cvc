@@ -1,5 +1,5 @@
 export type { SourceDoc, KolDataProvider, ClientIntelProvider, ClientIntelSource } from './types';
-export { ProviderError, type ProviderErrorCode } from './errors';
+export { ProviderError, isAccountError, type ProviderErrorCode } from './errors';
 export {
   isKolProviderConfigured,
   isFirecrawlConfigured,
